@@ -6,16 +6,16 @@ Built for the Pixel 10 Pro, with Android 15+ support, Jetpack Compose, Material 
 
 ## What you can do
 
-- **Scan your screen:** invoke Glimpse as your digital assistant to open an unbranded, edge-lit overlay. Circle an area or tap text, then search, copy, or translate without manually taking or saving a screenshot.
+- **Scan your screen:** invoke Glimpse as your digital assistant for immediate **Mark to search**, **Translate**, **Music**, and **Camera** actions inside an unbranded overlay with a corner-aware, blurred inset ring. Tap **Mark to search**, then circle an area or tap text to search or copy without manually taking or saving a screenshot. Back fades the assistant away.
 - **Copy and edit text:** recognize English, Japanese, and mixed-language images locally; copy selected words or entire passages.
 - **Translate photos and screenshots:** download language packs, translate on device, toggle translated overlays, or open a browser translator.
 - **Scan with the camera:** take a picture or switch to **Live translate**. Stable text is translated locally and overlaid on the preview.
-- **Live screen translation:** choose a single app in Android's capture dialog and translate it while scrolling. Display-over-apps access keeps translation labels and pause/stop controls above that app.
+- **Live screen translation:** tap the assistant's **Translate** action to open setup, grant display-over-apps access and approve Android's capture consent. Whole-display translation works across apps and refreshes after scrolling settles, with in-place labels and a compact language/original/pause/stop dock instead of a large translation-text panel.
 - **Identify music:** listen through the microphone, internal phone audio (including headphones), or both. Use your own AudD API key online, or install reference packs for fully offline matching. Results preserve input sources and available media-session app attribution. See [song packs and catalogue availability](docs/song-packs.md).
 - **Search:** Google, Bing, and Kagi text searches; Google/Bing visual-search upload pages receive your selected crop. Add custom search or AI URL templates in Settings.
 - **Import and share:** Android photo picker, image share targets, Android's text-selection menu, and save/share selected crops.
 
-The camera icon is available directly in the assistant workspace. Quick Settings includes **Scan camera** and **Scan screen**; long-press the app icon for the same launcher shortcuts.
+The **Camera** action is available directly in the assistant's bottom strip. Quick Settings includes **Scan camera** and **Scan screen**; long-press the app icon for the same launcher shortcuts.
 
 ## Install and get started
 
