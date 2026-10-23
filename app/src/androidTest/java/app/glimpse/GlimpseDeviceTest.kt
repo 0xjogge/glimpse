@@ -198,10 +198,10 @@ class GlimpseDeviceTest {
 
     @Test
     fun visualUploadSuppliesOnlyTheSelectedCropToThePage() = runBlocking {
-        val crop =
-            Images.shareCrop(compose.activity, Images.sample(), ImageRegion(.25f, .2f, .75f, .6f))
+        val context = compose.activity
+        val crop = Images.shareCrop(context, Images.sample(), ImageRegion(.25f, .2f, .75f, .6f))
         val intent =
-            Intent(compose.activity, VisualSearchActivity::class.java)
+            Intent(context, VisualSearchActivity::class.java)
                 .putExtra("url", "https://www.google.com/imghp")
                 .putExtra("provider", "Upload fixture")
                 .putExtra("crop", crop.toString())
@@ -265,24 +265,26 @@ class GlimpseDeviceTest {
             }
             assertTrue("Visual-search window must own input focus", focused.get())
             device.findObject(androidx.test.uiautomator.By.text("Upload fixture image")).click()
-            val uploaded =
-                device.wait(
-                    androidx.test.uiautomator.Until.hasObject(
-                        androidx.test.uiautomator.By.text("Crop 540x560"),
-                    ),
-                    20_000,
-                )
-            if (!uploaded) {
+            // Read the real decoded DOM result, independent of WebView's accessibility
+            // cache invalidation timing after replacing the document body.
+            var details = "No DOM result"
+            val uploadDeadline = android.os.SystemClock.elapsedRealtime() + 20_000
+            while (
+                details != "Crop 540x560" &&
+                    android.os.SystemClock.elapsedRealtime() < uploadDeadline
+            ) {
                 val done = CountDownLatch(1)
-                var details = "No DOM result"
                 scenario.onActivity {
                     browser!!.evaluateJavascript("document.body.innerText") {
-                        details = it
+                        details = org.json.JSONTokener(it).nextValue().toString().trim()
                         done.countDown()
                     }
                 }
                 done.await(5, TimeUnit.SECONDS)
-                device.takeScreenshot(File(compose.activity.cacheDir, "upload-failure.png"))
+                android.os.SystemClock.sleep(100)
+            }
+            if (details != "Crop 540x560") {
+                device.takeScreenshot(File(context.cacheDir, "upload-failure.png"))
                 fail("Upload fixture did not decode the selected crop: $details")
             }
         }
