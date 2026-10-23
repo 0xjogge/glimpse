@@ -17,6 +17,8 @@ import app.glimpse.data.ImageSession
 import app.glimpse.data.Images
 import app.glimpse.search.VisualSearchActivity
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.*
 import org.junit.Assert.*
@@ -221,14 +223,19 @@ class GlimpseDeviceTest {
             }
             assertNotNull(browser)
             scenario.onActivity {
+                browser!!.stopLoading()
                 browser!!.loadDataWithBaseURL(
                     "https://fixture.invalid/",
                     """
                     <html><meta name="viewport" content="width=device-width,initial-scale=1"><body>
-                    <button style="font-size:24px" onclick="document.getElementById('file').click()">Upload fixture image</button>
+                    <button style="position:absolute;top:120px;left:20px;width:280px;height:100px;font-size:24px"
+                      onclick="this.textContent='Opening image';document.getElementById('file').click()">Upload fixture image</button>
                     <input id="file" type="file" accept="image/*" style="display:none" onchange="
+                      document.getElementById('status').textContent='File received';
                       const img = new Image(); img.onload = () => { document.body.textContent = 'Crop ' + img.width + 'x' + img.height; };
+                      img.onerror = () => { document.body.textContent = 'Image decode failed'; };
                       img.src = window.URL.createObjectURL(this.files[0]);">
+                    <p id="status"></p>
                     </body></html>
                     """
                         .trimIndent(),
@@ -249,15 +256,35 @@ class GlimpseDeviceTest {
                     10_000,
                 ),
             )
+            device.waitForIdle()
+            val focused = java.util.concurrent.atomic.AtomicBoolean(false)
+            val focusDeadline = android.os.SystemClock.elapsedRealtime() + 10_000
+            while (!focused.get() && android.os.SystemClock.elapsedRealtime() < focusDeadline) {
+                scenario.onActivity { focused.set(it.hasWindowFocus()) }
+                android.os.SystemClock.sleep(100)
+            }
+            assertTrue("Visual-search window must own input focus", focused.get())
             device.findObject(androidx.test.uiautomator.By.text("Upload fixture image")).click()
-            assertTrue(
+            val uploaded =
                 device.wait(
                     androidx.test.uiautomator.Until.hasObject(
                         androidx.test.uiautomator.By.text("Crop 540x560"),
                     ),
-                    15_000,
-                ),
-            )
+                    20_000,
+                )
+            if (!uploaded) {
+                val done = CountDownLatch(1)
+                var details = "No DOM result"
+                scenario.onActivity {
+                    browser!!.evaluateJavascript("document.body.innerText") {
+                        details = it
+                        done.countDown()
+                    }
+                }
+                done.await(5, TimeUnit.SECONDS)
+                device.takeScreenshot(File(compose.activity.cacheDir, "upload-failure.png"))
+                fail("Upload fixture did not decode the selected crop: $details")
+            }
         }
     }
 
