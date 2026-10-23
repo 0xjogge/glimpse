@@ -175,7 +175,7 @@ class GlimpseDeviceTest {
             assertTrue(
                 device.wait(
                     androidx.test.uiautomator.Until.hasObject(
-                        androidx.test.uiautomator.By.desc("Open camera"),
+                        androidx.test.uiautomator.By.desc("Camera"),
                     ),
                     10_000,
                 ),

@@ -17,6 +17,8 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import app.glimpse.assistant.AssistantActivity
 import app.glimpse.assistant.CapturePermissionActivity
+import app.glimpse.assistant.ScreenTranslationService
+import app.glimpse.assistant.ScreenTranslationSession
 import app.glimpse.core.*
 import app.glimpse.data.ImageSession
 import app.glimpse.data.Images
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Assume
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -45,11 +48,37 @@ class AssistantFeatureTest {
         ImageSession.offer(Images.sample(), "Screen fixture", assistantOnly = true)
         ActivityScenario.launch<AssistantActivity>(Intent(context, AssistantActivity::class.java))
             .use { scenario ->
-                assertTrue(device.wait(Until.hasObject(By.desc("Close assistant")), 15000))
+                for (action in listOf("Mark to search", "Translate", "Music", "Camera")) {
+                    assertTrue(device.wait(Until.hasObject(By.desc(action).enabled(true)), 15000))
+                }
                 assertFalse(device.hasObject(By.text("Glimpse").pkg(context.packageName)))
-                assertTrue(device.hasObject(By.desc("Translate screen")))
-                assertTrue(device.hasObject(By.desc("Open camera")))
-                assertTrue(device.hasObject(By.desc("Recognize music")))
+                assertFalse(device.hasObject(By.desc("Close assistant")))
+                assertFalse(device.hasObject(By.descStartsWith("Image selection.")))
+                device.takeScreenshot(File(context.cacheDir, "assistant-overlay.png"))
+                device.findObject(By.desc("Music")).click()
+                assertTrue(device.wait(Until.hasObject(By.text("Identify a song")), 5000))
+                assertTrue(device.hasObject(By.text("Both")))
+                assertTrue(device.hasObject(By.text("Phone")))
+                assertTrue(device.hasObject(By.text("Mic")))
+                device.findObject(By.desc("Close music")).click()
+                assertTrue(device.wait(Until.gone(By.text("Identify a song")), 5000))
+                device.findObject(By.desc("Mark to search")).click()
+                val marking =
+                    device.wait(Until.hasObject(By.descStartsWith("Image selection.")), 5000)
+                if (!marking) {
+                    device.takeScreenshot(File(context.cacheDir, "assistant-mark-failure.png"))
+                    device.dumpWindowHierarchy(File(context.cacheDir, "assistant-mark-failure.xml"))
+                    scenario.onActivity {
+                        assertTrue(
+                            ViewModelProvider(it)[GlimpseViewModel::class.java]
+                                .state
+                                .value
+                                .toString(),
+                            marking,
+                        )
+                    }
+                }
+                assertTrue(marking)
                 await {
                     var ready = false
                     scenario.onActivity {
@@ -61,16 +90,23 @@ class AssistantFeatureTest {
                     }
                     ready
                 }
-                device.takeScreenshot(File(context.cacheDir, "assistant-overlay.png"))
-                device.findObject(By.desc("Recognize music")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Identify a song")), 5000))
-                assertTrue(device.hasObject(By.text("Both")))
-                assertTrue(device.hasObject(By.text("Phone")))
-                assertTrue(device.hasObject(By.text("Mic")))
-                device.findObject(By.desc("Close music")).click()
-                device.findObject(By.desc("Translate screen")).click()
-                assertTrue(device.wait(Until.hasObject(By.text("Live screen translate")), 5000))
-                device.findObject(By.desc("Close assistant")).click()
+                val image = device.findObject(By.descStartsWith("Image selection.")).visibleBounds
+                device.swipe(
+                    image.left + image.width() / 5,
+                    image.centerY() - image.height() / 10,
+                    image.left + image.width() * 3 / 5,
+                    image.centerY(),
+                    20,
+                )
+                assertTrue(device.wait(Until.hasObject(By.desc("Collapse result")), 5000))
+                scenario.onActivity {
+                    assertNotNull(
+                        ViewModelProvider(it)[GlimpseViewModel::class.java].state.value.selection,
+                    )
+                }
+                assertFalse(device.hasObject(By.text("Translate your screen")))
+                device.pressBack()
+                assertTrue(device.wait(Until.gone(By.desc("Mark to search")), 5000))
                 await { ImageSession.image.value == null }
             }
     }
@@ -109,6 +145,87 @@ class AssistantFeatureTest {
                 }
             await { ImageSession.image.value == null }
         }
+    }
+
+    @Test
+    fun assistantRetainsOnlyItsOwnCaptureAcrossLaterInvocations() {
+        ImageSession.offer(Images.sample(), "First assistant", assistantOnly = true)
+        val first = ImageSession.image.value!!.id
+        try {
+            ActivityScenario.launch<AssistantActivity>(
+                    Intent(context, AssistantActivity::class.java),
+                )
+                .use { scenario ->
+                    await {
+                        var ready = false
+                        scenario.onActivity {
+                            ready =
+                                ViewModelProvider(it)[GlimpseViewModel::class.java]
+                                    .state
+                                    .value
+                                    .image
+                                    ?.id == first
+                        }
+                        ready
+                    }
+                    ImageSession.offer(Images.sample(), "Later assistant", assistantOnly = true)
+                    val later = ImageSession.image.value!!.id
+                    android.os.SystemClock.sleep(250)
+                    scenario.onActivity {
+                        assertEquals(
+                            first,
+                            ViewModelProvider(it)[GlimpseViewModel::class.java]
+                                .state
+                                .value
+                                .image
+                                ?.id,
+                        )
+                    }
+                    device.pressBack()
+                    await { !device.hasObject(By.desc("Mark to search")) }
+                    assertEquals(
+                        "Closing the old assistant must not clear a newer capture",
+                        later,
+                        ImageSession.image.value?.id,
+                    )
+                }
+        } finally {
+            ImageSession.clear()
+        }
+    }
+
+    @Test
+    fun edgeGlowLeavesPaddingAndFollowsPerCornerGeometry() {
+        val insets =
+            android.view.WindowInsets.Builder()
+                .setRoundedCorner(
+                    android.view.RoundedCorner.POSITION_TOP_LEFT,
+                    android.view.RoundedCorner(
+                        android.view.RoundedCorner.POSITION_TOP_LEFT,
+                        60,
+                        60,
+                        60,
+                    ),
+                )
+                .setRoundedCorner(
+                    android.view.RoundedCorner.POSITION_TOP_RIGHT,
+                    android.view.RoundedCorner(
+                        android.view.RoundedCorner.POSITION_TOP_RIGHT,
+                        100,
+                        400,
+                        100,
+                    ),
+                )
+                .build()
+        val bitmap = Bitmap.createBitmap(500, 1000, Bitmap.Config.ARGB_8888)
+        val renderer = app.glimpse.assistant.EdgeGlowRenderer(1f)
+        renderer.updateBounds(500, 1000, insets)
+        renderer.draw(android.graphics.Canvas(bitmap))
+        assertEquals(0, android.graphics.Color.alpha(bitmap.getPixel(0, 500)))
+        assertEquals(0, android.graphics.Color.alpha(bitmap.getPixel(11, 11)))
+        assertTrue(android.graphics.Color.alpha(bitmap.getPixel(60, 11)) > 200)
+        assertTrue(android.graphics.Color.alpha(bitmap.getPixel(489, 100)) > 200)
+        assertEquals(0, android.graphics.Color.alpha(bitmap.getPixel(489, 11)))
     }
 
     @Test
@@ -325,23 +442,30 @@ class AssistantFeatureTest {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
             }
-            assertTrue(device.wait(Until.hasObject(By.text("Choose a single app")), 10000))
-            device.findObject(By.res("android:id/button1")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("Translate your screen")), 10000))
+            device.findObject(button("Start translating")).click()
             val controlsVisible = device.wait(Until.hasObject(button("Stop")), 15000)
             device.takeScreenshot(File(context.cacheDir, "live-screen.png"))
             device.dumpWindowHierarchy(File(context.cacheDir, "live-screen.xml"))
             assertTrue(controlsVisible)
-            // The preapproved full-display grant exercises the feedback guard as well as lifecycle.
-            assertTrue(
-                device.wait(
-                    Until.hasObject(By.textContains("Entire-screen sharing detected")),
-                    15000,
-                ),
-            )
+            await { ScreenTranslationSession.state.value.cleanFrames > 0 }
+            assertFalse(device.hasObject(By.textContains("Entire-screen sharing detected")))
+            assertFalse(device.hasObject(By.text("Choose a single app")))
+            device.findObject(button("Original")).click()
+            await { ScreenTranslationSession.state.value.original }
+            device.findObject(button("Translated")).click()
+            await { !ScreenTranslationSession.state.value.original }
             device.findObject(button("Pause")).click()
             assertTrue(device.wait(Until.hasObject(button("Resume")), 5000))
+            await { ScreenTranslationSession.state.value.paused }
+            device.findObject(button("Resume")).click()
+            await {
+                !ScreenTranslationSession.state.value.paused &&
+                    ScreenTranslationSession.state.value.cleanFrames > 1
+            }
             device.findObject(button("Stop")).click()
             assertTrue(device.wait(Until.gone(button("Stop")), 5000))
+            await { !ScreenTranslationSession.state.value.active }
         } finally {
             context.stopService(
                 Intent(context, app.glimpse.assistant.ScreenTranslationService::class.java),
@@ -352,17 +476,51 @@ class AssistantFeatureTest {
     }
 
     @Test
-    fun singleAppLiveCaptureTranslatesWhileTheUnderlyingAppRemainsInteractive() = runBlocking {
+    fun wholeScreenCaptureTranslatesAfterScrollingAndRejectsItsOwnLabelsOffline() = runBlocking {
+        Assume.assumeTrue(
+            "Opt in to real translation model setup",
+            InstrumentationRegistry.getArguments().getString("downloadModels") == "true",
+        )
         ImageSession.clear()
-        val preferences = (context.applicationContext as GlimpseApplication).graph.preferences
+        val graph = (context.applicationContext as GlimpseApplication).graph
+        graph.engines.translator("mlkit-translation").download("ja", false)
+        val preferences = graph.preferences
         val previous = preferences.values.first()
-        preferences.set("source", "en")
+        preferences.set("source", "ja")
         preferences.set("target", "en")
         shell("appops set app.glimpse SYSTEM_ALERT_WINDOW allow")
         shell("appops set app.glimpse PROJECT_MEDIA default")
+        shell("svc wifi disable")
+        shell("svc data disable")
         try {
             ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use {
-                assertTrue(device.wait(Until.hasObject(By.text("Try an example")), 10000))
+                fixture ->
+                lateinit var greeting: android.widget.TextView
+                fixture.onActivity { activity ->
+                    val content =
+                        android.widget.LinearLayout(activity).apply {
+                            orientation = android.widget.LinearLayout.VERTICAL
+                            setPadding(60, 160, 60, 160)
+                            setBackgroundColor(android.graphics.Color.WHITE)
+                        }
+                    repeat(30) { index ->
+                        val line =
+                            android.widget.TextView(activity).apply {
+                                text =
+                                    if (index == 0) "こんにちは"
+                                    else if (index % 2 == 0) "今日は良い天気です" else "日本へようこそ"
+                                textSize = 32f
+                                setTextColor(android.graphics.Color.BLACK)
+                                setPadding(0, 20, 0, 60)
+                            }
+                        if (index == 0) greeting = line
+                        content.addView(line)
+                    }
+                    activity.setContentView(
+                        android.widget.ScrollView(activity).apply { addView(content) },
+                    )
+                }
+                assertTrue(device.wait(Until.hasObject(By.text("こんにちは")), 10000))
                 instrumentation.runOnMainSync {
                     context.startActivity(
                         Intent(context, CapturePermissionActivity::class.java)
@@ -370,8 +528,8 @@ class AssistantFeatureTest {
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     )
                 }
-                assertTrue(device.wait(Until.hasObject(By.text("Choose a single app")), 10000))
-                device.findObject(By.res("android:id/button1")).click()
+                assertTrue(device.wait(Until.hasObject(By.text("Translate your screen")), 10000))
+                device.findObject(button("Start translating")).click()
                 assertTrue(
                     device.wait(
                         Until.hasObject(By.res("android:id/button1").pkg("com.android.systemui")),
@@ -379,27 +537,79 @@ class AssistantFeatureTest {
                     ),
                 )
                 device.dumpWindowHierarchy(File(context.cacheDir, "projection-dialog.xml"))
+                assertFalse(
+                    "Whole-display consent must not open an app picker",
+                    device.hasObject(By.text("Choose a single app")),
+                )
                 device.findObject(By.res("android:id/button1").pkg("com.android.systemui")).click()
-                val task =
-                    device.wait(
-                        Until.findObject(By.text("Glimpse").pkg("com.android.systemui")),
-                        10000,
-                    )
-                if (task == null)
-                    device.dumpWindowHierarchy(File(context.cacheDir, "projection-chooser.xml"))
-                assertNotNull("Select Glimpse's existing task in Android's app chooser", task)
-                task!!.click()
                 assertTrue(device.wait(Until.hasObject(button("Stop")), 15000))
-                assertTrue(
-                    device.wait(Until.hasObject(By.textContains("On-device translation")), 15000),
+                awaitLive { state ->
+                    state.regions.any {
+                        it.sourceText.contains("こんにちは") && it.translatedText != it.sourceText
+                    }
+                }
+                val first = ScreenTranslationSession.state.value
+                assertFalse(
+                    first.sourceText,
+                    first.sourceText.contains("Stop") || first.sourceText.contains("Original"),
                 )
-                device.findObject(By.text("Try an example")).click()
-                assertTrue(
-                    device.wait(Until.hasObject(By.text("Circle an area or tap text")), 15000),
+                assertTrue(first.cleanFrames > 0 && first.rejectedFrames > 0)
+                device.takeScreenshot(File(context.cacheDir, "live-whole-screen.png"))
+                android.os.SystemClock.sleep(1500)
+                assertEquals(
+                    "A still translated page must not repeatedly hide/retranslate",
+                    first.scene,
+                    ScreenTranslationSession.state.value.scene,
                 )
+                assertTrue(ScreenTranslationSession.state.value.regions.isNotEmpty())
+                // Only the text beneath an existing label changes; local motion must notice it.
+                fixture.onActivity { greeting.text = "ありがとうございます" }
+                awaitLive { state -> state.regions.any { it.sourceText.contains("ありがとう") } }
+                assertFalse(
+                    ScreenTranslationSession.state.value.regions.any {
+                        it.sourceText.contains("こんにちは")
+                    },
+                )
+                val beforeScroll = ScreenTranslationSession.state.value.scene
+                device.swipe(
+                    device.displayWidth / 2,
+                    device.displayHeight * 2 / 3,
+                    device.displayWidth / 2,
+                    device.displayHeight / 4,
+                    30,
+                )
+                awaitLive { it.scene > beforeScroll && it.regions.isNotEmpty() }
+                assertFalse(
+                    ScreenTranslationSession.state.value.regions.any {
+                        it.sourceText.contains("ありがとう")
+                    },
+                )
+                val beforeSwitch = ScreenTranslationSession.state.value.scene
+                instrumentation.runOnMainSync {
+                    context.startActivity(
+                        Intent()
+                            .setComponent(
+                                android.content.ComponentName(
+                                    "app.glimpse.test",
+                                    "app.glimpse.TranslationFixtureActivity",
+                                ),
+                            )
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                awaitLive {
+                    it.scene > beforeSwitch &&
+                        it.regions.any { region -> region.sourceText.contains("さようなら") }
+                }
+                assertFalse(ScreenTranslationSession.state.value.sourceText.contains("日本へようこそ"))
                 device.setOrientationLeft()
-                assertTrue(device.wait(Until.hasObject(button("Stop")), 10000))
-                device.takeScreenshot(File(context.cacheDir, "live-single-app.png"))
+                val rotatedControls = device.wait(Until.hasObject(button("Stop")), 10000)
+                if (!rotatedControls) {
+                    device.takeScreenshot(File(context.cacheDir, "live-rotation-failure.png"))
+                    device.dumpWindowHierarchy(File(context.cacheDir, "live-rotation-failure.xml"))
+                }
+                assertTrue(ScreenTranslationSession.state.value.toString(), rotatedControls)
+                device.takeScreenshot(File(context.cacheDir, "live-whole-screen-rotated.png"))
                 device.findObject(button("Stop")).click()
                 assertTrue(device.wait(Until.gone(button("Stop")), 5000))
             }
@@ -411,7 +621,22 @@ class AssistantFeatureTest {
             device.unfreezeRotation()
             preferences.set("source", previous.source)
             preferences.set("target", previous.target)
+            shell("svc wifi enable")
+            shell("svc data enable")
+            shell("appops set app.glimpse PROJECT_MEDIA default")
             shell("appops set app.glimpse SYSTEM_ALERT_WINDOW default")
+        }
+    }
+
+    private fun awaitLive(check: (app.glimpse.assistant.ScreenTranslationState) -> Boolean) {
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30000
+        while (
+            !check(ScreenTranslationSession.state.value) &&
+                android.os.SystemClock.elapsedRealtime() < deadline
+        ) android.os.SystemClock.sleep(100)
+        if (!check(ScreenTranslationSession.state.value)) {
+            device.takeScreenshot(File(context.cacheDir, "live-failure.png"))
+            fail("Unexpected live translation state: ${ScreenTranslationSession.state.value}")
         }
     }
 
