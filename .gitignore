@@ -1,0 +1,12 @@
+.direnv/
+.gradle/
+.kotlin/
+.signing/
+.idea/
+**/build/
+local.properties
+node_modules/
+*.iml
+*.hprof
+__pycache__/
+*.pyc

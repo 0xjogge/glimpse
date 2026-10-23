@@ -1,0 +1,5 @@
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="app.glimpse.assistant.GlimpseSessionService"
+    android:recognitionService="app.glimpse.assistant.VisualOnlyRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false" />

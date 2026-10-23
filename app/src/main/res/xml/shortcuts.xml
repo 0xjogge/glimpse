@@ -1,0 +1,8 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="camera" android:icon="@drawable/ic_camera" android:shortcutShortLabel="@string/scan_camera">
+        <intent android:action="app.glimpse.CAMERA" android:targetPackage="app.glimpse" android:targetClass="app.glimpse.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="screen" android:icon="@drawable/ic_scan" android:shortcutShortLabel="@string/scan_screen">
+        <intent android:action="app.glimpse.SCREEN" android:targetPackage="app.glimpse" android:targetClass="app.glimpse.MainActivity" />
+    </shortcut>
+</shortcuts>
