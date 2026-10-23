@@ -4,6 +4,7 @@ package app.glimpse.core
 class LiveTextStabilizer(private val repetitions: Int = 2) {
     private var previous = emptyMap<String, Int>()
 
+    @Synchronized
     fun update(lines: List<TextLine>): List<TextLine> {
         val counts =
             lines.map { it.text.trim() }.distinct().associateWith { (previous[it] ?: 0) + 1 }
@@ -11,6 +12,7 @@ class LiveTextStabilizer(private val repetitions: Int = 2) {
         return lines.filter { (counts[it.text.trim()] ?: 0) >= repetitions }
     }
 
+    @Synchronized
     fun reset() {
         previous = emptyMap()
     }

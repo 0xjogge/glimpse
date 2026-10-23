@@ -40,7 +40,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent) {
         when (intent.action) {
-            CAMERA -> model.page(Page.CAMERA)
+            CAMERA -> {
+                model.home()
+                model.page(Page.CAMERA)
+            }
             SCREEN -> captureScreen()
             SETUP -> {
                 model.page(Page.SETTINGS)

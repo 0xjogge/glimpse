@@ -110,6 +110,8 @@ class GlimpseDeviceTest {
             compose.runOnIdle { model.set("theme", theme) }
             compose.waitUntil(5000) { model.preferences.value.theme == theme }
             compose.waitForIdle()
+            // System-bar icon colors animate outside Compose's idling resources.
+            android.os.SystemClock.sleep(500)
             val device =
                 androidx.test.uiautomator.UiDevice.getInstance(
                     InstrumentationRegistry.getInstrumentation(),

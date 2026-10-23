@@ -59,6 +59,7 @@ fun GlimpseApp(model: GlimpseViewModel, requestAssistant: () -> Unit, captureScr
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var returnPage by rememberSaveable { mutableStateOf(Page.HOME) }
+    var modelsReturnPage by rememberSaveable { mutableStateOf(Page.SETTINGS) }
     var searchMode by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf<String?>(null) }
     var languageDialog by remember { mutableStateOf<String?>(null) }
@@ -91,13 +92,13 @@ fun GlimpseApp(model: GlimpseViewModel, requestAssistant: () -> Unit, captureScr
         }
 
     fun navigate(page: Page) {
-        returnPage = state.page
+        if (page == Page.MODELS) modelsReturnPage = state.page else returnPage = state.page
         model.page(page)
     }
     fun back() {
         when (state.page) {
-            Page.SETTINGS,
-            Page.MODELS ->
+            Page.MODELS -> model.page(modelsReturnPage)
+            Page.SETTINGS ->
                 model.page(
                     if (returnPage in listOf(Page.SETTINGS, Page.MODELS))
                         if (state.image != null) Page.WORKSPACE else Page.HOME

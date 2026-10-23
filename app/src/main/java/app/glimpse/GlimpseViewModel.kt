@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import app.glimpse.core.*
 import app.glimpse.data.*
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -55,6 +56,7 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
     private val downloadJobs = mutableMapOf<String, Job>()
     private val cache = TranslationCache()
     private val stabilizer = LiveTextStabilizer()
+    private val liveGeneration = AtomicLong()
 
     init {
         viewModelScope.launch {
@@ -244,10 +246,17 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
                 mutableState.update {
                     it.copy(translation = Translation(result, source, prefs.target, engine.info.id))
                 }
+                val recognition = snapshot.recognition
                 val lines =
-                    snapshot.recognition?.lines.orEmpty().filter {
-                        snapshot.selection == null || snapshot.selection.includesCenter(it.bounds)
-                    }
+                    if (
+                        recognition != null &&
+                            recognition.textIn(snapshot.selection) == snapshot.text
+                    )
+                        recognition.lines.filter {
+                            snapshot.selection == null ||
+                                snapshot.selection.includesCenter(it.bounds)
+                        }
+                    else emptyList()
                 val overlays = mutableMapOf<String, String>()
                 for (line in lines) {
                     ensureActive()
@@ -275,13 +284,14 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
 
     fun download(tag: String) {
         if (tag in downloadJobs) return
+        val prefs = preferences.value
+        val engine = graph.engines.translator(prefs.translationEngine)
         mutableState.update { it.copy(downloading = it.downloading + tag) }
         downloadJobs[tag] = work {
             try {
-                graph.engines
-                    .translator(preferences.value.translationEngine)
-                    .download(tag, preferences.value.wifiOnly)
-                val models = graph.engines.translator(preferences.value.translationEngine).models()
+                engine.download(tag, prefs.wifiOnly)
+                val models = engine.models()
+                if (preferences.value.translationEngine != prefs.translationEngine) return@work
                 mutableState.update {
                     it.copy(models = models, missingModels = it.missingModels - tag)
                 }
@@ -334,6 +344,7 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resetLive() {
+        liveGeneration.incrementAndGet()
         stabilizer.reset()
         mutableLive.value = LiveState()
     }
@@ -341,14 +352,18 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
     /** Invoked serially by the camera analyzer. Live processing never uses a cloud provider. */
     suspend fun analyzeFrame(bitmap: Bitmap) {
         val prefs = preferences.value
+        val generation = liveGeneration.get()
         try {
             val recognition = graph.engines.ocr(prefs.ocrEngine).recognize(bitmap, prefs.script)
+            if (generation != liveGeneration.get()) return
             val stable = stabilizer.update(recognition.lines)
             val output = mutableMapOf<String, String>()
+            val stableText = stable.map { it.text }.toSet()
+            val retained = mutableLive.value.translations.filterKeys { it in stableText }
             mutableLive.value =
                 LiveState(
                     recognition,
-                    emptyMap(),
+                    retained,
                     if (stable.isEmpty()) "Hold steady to translate" else "Translating on device",
                 )
             val engine = graph.engines.translator(prefs.translationEngine)
@@ -356,7 +371,9 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
                 currentCoroutineContext().ensureActive()
                 val source = source(engine, line.text, prefs)
                 output[line.text] = translated(engine, line.text, source, prefs.target)
+                if (generation != liveGeneration.get()) return
             }
+            if (generation != liveGeneration.get()) return
             mutableLive.value =
                 LiveState(
                     recognition,
@@ -365,6 +382,7 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
                     else "On-device translation · ${languageName(prefs.target)}",
                 )
         } catch (e: ModelRequiredException) {
+            if (generation != liveGeneration.get()) return
             mutableLive.update {
                 it.copy(
                     status =
@@ -374,6 +392,7 @@ class GlimpseViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (generation != liveGeneration.get()) return
             mutableLive.update {
                 it.copy(status = e.localizedMessage ?: "Could not read this frame")
             }
