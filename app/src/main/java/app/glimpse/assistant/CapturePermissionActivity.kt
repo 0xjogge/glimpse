@@ -113,8 +113,18 @@ class CapturePermissionActivity : ComponentActivity() {
             val prefs = graph.preferences.values.first()
             if (isFinishing) return@launch
             val engine = graph.engines.translator(prefs.translationEngine)
-            val fromLanguages = listOf(Language("auto", "Detect language")) + engine.languages
-            val toLanguages = engine.languages
+            val toLanguages =
+                engine.languages.sortedWith(
+                    compareBy<Language> {
+                            when (it.tag) {
+                                "en" -> 0
+                                "ja" -> 1
+                                else -> 2
+                            }
+                        }
+                        .thenBy { it.name },
+                )
+            val fromLanguages = listOf(Language("auto", "Detect language")) + toLanguages
             val content =
                 LinearLayout(this@CapturePermissionActivity).apply {
                     orientation = LinearLayout.VERTICAL
