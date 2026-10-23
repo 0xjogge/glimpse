@@ -449,12 +449,14 @@ fun GlimpseApp(model: GlimpseViewModel, requestAssistant: () -> Unit, captureScr
                 )
             Page.MODELS -> ModelsScreen(model, Modifier.padding(padding))
             Page.CAMERA ->
-                CameraScreen(
-                    model,
-                    ::back,
-                    { navigate(Page.MODELS) },
-                    { languageDialog = "target" },
-                )
+                GlimpseTheme(prefs.copy(theme = "dark")) {
+                    CameraScreen(
+                        model,
+                        ::back,
+                        { navigate(Page.MODELS) },
+                        { languageDialog = "target" },
+                    )
+                }
         }
     }
 

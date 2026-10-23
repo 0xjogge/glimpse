@@ -3,7 +3,10 @@ plugins { id("com.android.library") }
 android {
     namespace = "app.glimpse.engines.mlkit"
     compileSdk = 37
-    defaultConfig { minSdk = 35 }
+    defaultConfig {
+        minSdk = 35
+        consumerProguardFiles("consumer-rules.pro")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

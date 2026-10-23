@@ -2,15 +2,20 @@ package app.glimpse
 
 import android.content.ClipboardManager
 import android.content.Intent
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.glimpse.core.*
 import app.glimpse.data.ImageSession
 import app.glimpse.data.Images
+import app.glimpse.search.VisualSearchActivity
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.*
@@ -188,6 +193,73 @@ class GlimpseDeviceTest {
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command).use {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText()
         }
+
+    @Test
+    fun visualUploadSuppliesOnlyTheSelectedCropToThePage() = runBlocking {
+        val crop =
+            Images.shareCrop(compose.activity, Images.sample(), ImageRegion(.25f, .2f, .75f, .6f))
+        val intent =
+            Intent(compose.activity, VisualSearchActivity::class.java)
+                .putExtra("url", "https://www.google.com/imghp")
+                .putExtra("provider", "Upload fixture")
+                .putExtra("crop", crop.toString())
+        ActivityScenario.launch<VisualSearchActivity>(intent).use { scenario ->
+            fun findBrowser(view: View): WebView? {
+                if (view is WebView) return view
+                if (view is ViewGroup)
+                    for (index in 0 until view.childCount) findBrowser(view.getChildAt(index))
+                        ?.let {
+                            return it
+                        }
+                return null
+            }
+            var browser: WebView? = null
+            val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
+            while (browser == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                scenario.onActivity { browser = findBrowser(it.window.decorView) }
+                android.os.SystemClock.sleep(100)
+            }
+            assertNotNull(browser)
+            scenario.onActivity {
+                browser!!.loadDataWithBaseURL(
+                    "https://fixture.invalid/",
+                    """
+                    <html><meta name="viewport" content="width=device-width,initial-scale=1"><body>
+                    <button style="font-size:24px" onclick="document.getElementById('file').click()">Upload fixture image</button>
+                    <input id="file" type="file" accept="image/*" style="display:none" onchange="
+                      const img = new Image(); img.onload = () => { document.body.textContent = 'Crop ' + img.width + 'x' + img.height; };
+                      img.src = window.URL.createObjectURL(this.files[0]);">
+                    </body></html>
+                    """
+                        .trimIndent(),
+                    "text/html",
+                    "UTF-8",
+                    null,
+                )
+            }
+            val device =
+                androidx.test.uiautomator.UiDevice.getInstance(
+                    InstrumentationRegistry.getInstrumentation(),
+                )
+            assertTrue(
+                device.wait(
+                    androidx.test.uiautomator.Until.hasObject(
+                        androidx.test.uiautomator.By.text("Upload fixture image"),
+                    ),
+                    10_000,
+                ),
+            )
+            device.findObject(androidx.test.uiautomator.By.text("Upload fixture image")).click()
+            assertTrue(
+                device.wait(
+                    androidx.test.uiautomator.Until.hasObject(
+                        androidx.test.uiautomator.By.text("Crop 540x560"),
+                    ),
+                    15_000,
+                ),
+            )
+        }
+    }
 
     @Test
     fun downloadedJapaneseTranslatesStaticAndLiveFramesOffline() = runBlocking {

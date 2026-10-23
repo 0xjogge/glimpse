@@ -165,7 +165,13 @@ class VisualSearchActivity : ComponentActivity() {
                                                 callback: ValueCallback<Array<Uri>>,
                                                 params: FileChooserParams?,
                                             ): Boolean {
-                                                callback.onReceiveValue(arrayOf(crop))
+                                                // Complete after the chooser callback has unwound,
+                                                // as
+                                                // with an ActivityResult. Re-entrant completion can
+                                                // invalidate Chromium's pending chooser state.
+                                                view?.post {
+                                                    callback.onReceiveValue(arrayOf(crop))
+                                                }
                                                 return true
                                             }
                                         }
