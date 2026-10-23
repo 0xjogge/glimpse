@@ -1,0 +1,12 @@
+.direnv/
+.gradle/
+.kotlin/
+.signing/
+**/build/
+node_modules/
+app/
+core/
+engines/
+gradle/
+gradlew*
+LICENSE
