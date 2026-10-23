@@ -1,20 +1,16 @@
 package app.glimpse.assistant
 
-import android.animation.ValueAnimator
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,15 +20,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.glimpse.GlimpseViewModel
 import app.glimpse.MainActivity
@@ -44,29 +40,36 @@ import app.glimpse.ui.SelectableImage
 import kotlinx.coroutines.launch
 
 @Composable
-fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (String) -> Unit) {
+fun AssistantOverlay(
+    model: GlimpseViewModel,
+    dismiss: () -> Unit,
+    openApp: (String) -> Unit,
+    translateScreen: () -> Unit,
+    initialAction: AssistantAction? = null,
+    initialQuery: String = "",
+    submitInitialSearch: Boolean = false,
+) {
     val state by model.state.collectAsStateWithLifecycle()
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var language by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf<String?>(null) }
-    var pendingTranslation by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    var music by rememberSaveable { mutableStateOf(false) }
+    var mode by rememberSaveable { mutableStateOf(initialAction?.name) }
+    val music = mode == AssistantAction.MUSIC.name
+    val marking = mode == AssistantAction.MARK.name
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    // Dialogs and popups own their Back; the IME consumes Back before the workspace exits.
+    BackHandler(language == null && editText == null && !menu && !imeVisible, dismiss)
     val provider =
         prefs.providers.firstOrNull { it.id == prefs.search } ?: SearchProviders.builtIn.first()
-    LaunchedEffect(state.reading, state.text) {
-        if (pendingTranslation && !state.reading) {
-            pendingTranslation = false
-            model.translate()
-        }
-    }
     fun search() {
         val text = query.ifBlank { state.text }.take(8000)
         if (text.isBlank()) {
+            mode = null
             expanded = true
             return
         }
@@ -75,19 +78,31 @@ fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (Str
         }
             .onFailure { model.message("No browser could open the search") }
     }
+    LaunchedEffect(Unit) {
+        if (submitInitialSearch) search()
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .08f))) {
-        if (state.image != null)
-            SelectableImage(state, Modifier.fillMaxSize()) {
-                model.select(it)
-                expanded = true
+        state.image?.let { image ->
+            if (marking) {
+                SelectableImage(state, Modifier.fillMaxSize()) {
+                    model.select(it)
+                    expanded = true
+                }
+            } else {
+                Image(
+                    image.bitmap.asImageBitmap(),
+                    image.origin,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
             }
+        }
         EdgeLight(state.reading || state.translating)
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilledTonalIconButton(dismiss) { Icon(Icons.Outlined.Close, "Close assistant") }
             Spacer(Modifier.weight(1f))
             Box {
                 FilledTonalIconButton({ menu = true }) {
@@ -112,7 +127,9 @@ fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (Str
                         { Text("Select whole screen") },
                         {
                             menu = false
+                            mode = AssistantAction.MARK.name
                             model.select(null)
+                            expanded = true
                         },
                     )
                 }
@@ -127,7 +144,7 @@ fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (Str
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (music) {
-                app.glimpse.music.MusicPanel(onClose = { music = false })
+                app.glimpse.music.MusicPanel(onClose = { mode = null })
             } else if (expanded || state.message != null) {
                 Surface(
                     shape = RoundedCornerShape(28.dp),
@@ -257,68 +274,39 @@ fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (Str
                                 )
                             }
                         }
-                        TextButton(
-                            {
-                                context.startActivity(
-                                    Intent(context, CapturePermissionActivity::class.java)
-                                        .setAction(CapturePermissionActivity.LIVE_TRANSLATE),
-                                )
-                                dismiss()
-                            },
-                        ) {
-                            Icon(Icons.Outlined.ScreenShare, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Live screen translate")
+                    }
+                }
+            }
+            if (marking && !expanded && state.message == null)
+                Surface(shape = RoundedCornerShape(16.dp)) {
+                    Text(
+                        if (state.image == null) "Enter a search; this screen is unavailable."
+                        else "Circle an area or tap text to search.",
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            AndroidView(
+                factory = { AssistantActionStrip(it) },
+                modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+                update = { strip ->
+                    strip.onQueryChanged = { query = it }
+                    strip.query = query
+                    strip.selectedAction = AssistantAction.entries.firstOrNull { it.name == mode }
+                    strip.onSearch = { search() }
+                    strip.onAction = { action ->
+                        when (action) {
+                            AssistantAction.MARK -> {
+                                mode = action.name
+                                expanded = false
+                            }
+                            AssistantAction.TRANSLATE -> translateScreen()
+                            AssistantAction.MUSIC -> mode = action.name
+                            AssistantAction.CAMERA -> openApp(MainActivity.CAMERA)
                         }
                     }
-                }
-            }
-            Surface(
-                shape = RoundedCornerShape(36.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-                tonalElevation = 6.dp,
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextField(
-                        query,
-                        { query = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search this screen…", maxLines = 1) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { search() }),
-                        shape = CircleShape,
-                        colors =
-                            TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                            ),
-                        trailingIcon = {
-                            IconButton(::search) { Icon(Icons.Outlined.Search, "Search") }
-                        },
-                    )
-                    IconButton({ music = !music }) {
-                        Icon(Icons.Outlined.MusicNote, "Recognize music")
-                    }
-                    IconButton(
-                        {
-                            expanded = true
-                            music = false
-                            if (state.reading) pendingTranslation = true else model.translate()
-                        },
-                    ) {
-                        Icon(Icons.Outlined.Translate, "Translate screen")
-                    }
-                    IconButton({ openApp(MainActivity.CAMERA) }) {
-                        Icon(Icons.Outlined.PhotoCamera, "Open camera")
-                    }
-                }
-            }
+                },
+            )
         }
     }
     language?.let { kind ->
@@ -360,30 +348,25 @@ fun AssistantOverlay(model: GlimpseViewModel, dismiss: () -> Unit, openApp: (Str
     }
 }
 
-/** One finite refraction sweep; the resting border is still, including in live modes. */
+/** The native bridge, Compose workspace and live service share one stationary renderer. */
 @Composable
 fun EdgeLight(busy: Boolean = false) {
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        if (ValueAnimator.areAnimatorsEnabled()) progress.animateTo(1f, tween(850))
-        else progress.snapTo(1f)
-    }
-    val first = lerp(MaterialTheme.colorScheme.primary, Color(0xFF66E2CE), .55f)
-    val second = lerp(MaterialTheme.colorScheme.tertiary, Color(0xFFB995FF), .55f)
+    val density = LocalDensity.current.density
+    val view = LocalView.current
+    val renderer = remember(density) { EdgeGlowRenderer(density) }
+    val location = remember { IntArray(2) }
+    // A full-screen AndroidView would occlude the underlying Compose accessibility nodes even
+    // when its native View is non-interactive. Draw the shared renderer in Compose instead.
     Canvas(Modifier.fillMaxSize()) {
-        val brush =
-            Brush.linearGradient(
-                listOf(first, second, first),
-                Offset(0f, size.height * (1 - progress.value)),
-                Offset(size.width, size.height),
-            )
-        for (width in listOf(40f, 24f, 10f, 3f)) {
-            drawRoundRect(
-                brush,
-                cornerRadius = CornerRadius(30.dp.toPx()),
-                style = Stroke(width.dp.toPx()),
-                alpha = if (width == 3f) .85f else if (busy) .12f else .07f,
-            )
-        }
+        view.getLocationInWindow(location)
+        renderer.busy = busy
+        renderer.updateBounds(
+            size.width.toInt(),
+            size.height.toInt(),
+            view.rootWindowInsets,
+            location[0],
+            location[1],
+        )
+        renderer.draw(drawContext.canvas.nativeCanvas)
     }
 }

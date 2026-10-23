@@ -4,11 +4,7 @@ import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Shader
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,8 +12,15 @@ import android.service.quicksettings.TileService
 import android.service.voice.VoiceInteractionService
 import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
+import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.widget.FrameLayout
+import androidx.core.view.WindowCompat
 import app.glimpse.MainActivity
+import app.glimpse.R
+import app.glimpse.data.CapturedImage
 import app.glimpse.data.ImageSession
 
 class GlimpseVoiceService : VoiceInteractionService() {
@@ -54,52 +57,103 @@ class GlimpseSessionService : VoiceInteractionSessionService() {
 }
 
 private class GlimpseSession(context: android.content.Context) : VoiceInteractionSession(context) {
+    private enum class Stage {
+        WAITING,
+        HANDED_OFF,
+        CLOSED,
+    }
+
     private val handler = Handler(Looper.getMainLooper())
-    private var launched = false
+    private var stage = Stage.WAITING
+    private var root: FrameLayout? = null
+    private var strip: AssistantActionStrip? = null
+    private var selected: AssistantAction? = null
+    private var imageId: String? = null
     private val timeout = Runnable {
         openOverlay("Screen access is unavailable. Search, music and camera are still available.")
     }
 
-    // The system session is only the capture bridge. Its unbranded edge light hands off to
-    // a translucent activity with a real Compose lifecycle, keyboard and permission handling.
-    override fun onCreateContentView(): View =
-        object : View(context) {
-            private val paint =
-                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.STROKE
-                    strokeWidth = 8 * resources.displayMetrics.density
-                    alpha = 140
-                }
+    init {
+        setTheme(R.style.Theme_Glimpse_Overlay)
+    }
 
-            override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-                paint.shader =
-                    LinearGradient(
-                        0f,
-                        0f,
-                        w.toFloat(),
-                        h.toFloat(),
-                        Color.rgb(102, 226, 206),
-                        Color.rgb(185, 149, 255),
-                        Shader.TileMode.CLAMP,
+    // Native controls are immediately usable while the system is still delivering its screenshot.
+    // Only the eventual workspace needs Compose's activity lifecycle and permission handling.
+    override fun onCreateContentView(): View {
+        val density = context.resources.displayMetrics.density
+        val margin = (16 * density).toInt()
+        val actions =
+            AssistantActionStrip(context).apply {
+                selectedAction = selected
+                onAction = ::selectAction
+                onSearch = { openOverlay(null, submitSearch = true) }
+            }
+        strip = actions
+        return FrameLayout(context).apply {
+            layoutParams =
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                )
+            setBackgroundColor(Color.argb(20, 0, 0, 0))
+            addView(
+                EdgeGlowView(context),
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                actions,
+                FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM,
                     )
+                    .apply { setMargins(margin, 0, margin, margin) },
+            )
+            setOnApplyWindowInsetsListener { _, insets ->
+                val safe =
+                    insets.getInsets(
+                        WindowInsets.Type.navigationBars() or WindowInsets.Type.ime(),
+                    )
+                actions.layoutParams =
+                    (actions.layoutParams as FrameLayout.LayoutParams).apply {
+                        setMargins(margin + safe.left, 0, margin + safe.right, margin + safe.bottom)
+                    }
+                insets
             }
-
-            override fun onDraw(canvas: Canvas) {
-                canvas.drawRoundRect(5f, 5f, width - 5f, height - 5f, 48f, 48f, paint)
-            }
+            root = this
         }
+    }
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        launched = false
-        ImageSession.clear()
+        if (stage != Stage.WAITING) return
+        window?.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.setWindowAnimations(0)
+            window.setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN,
+            )
+            window.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+            )
+        }
+        root?.requestApplyInsets()
         handler.removeCallbacks(timeout)
         handler.postDelayed(timeout, 1600)
     }
 
     override fun onHandleScreenshot(screenshot: Bitmap?) {
-        if (launched) return
-        if (screenshot != null) ImageSession.offer(screenshot, "Your screen", assistantOnly = true)
+        if (stage != Stage.WAITING) return
+        if (screenshot != null) {
+            val image = CapturedImage(screenshot, "Your screen", assistantOnly = true)
+            imageId = image.id
+            ImageSession.image.value = image
+        }
         openOverlay(
             if (screenshot == null)
                 "This screen cannot be captured. Search, music and camera are still available."
@@ -107,22 +161,74 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
         )
     }
 
-    private fun openOverlay(error: String?) {
-        if (launched) return
-        launched = true
-        handler.removeCallbacks(timeout)
-        startAssistantActivity(
-            Intent(context, AssistantActivity::class.java).putExtra("capture_error", error),
+    private fun selectAction(action: AssistantAction) {
+        if (stage != Stage.WAITING) return
+        selected = action
+        strip?.selectedAction = action
+        when (action) {
+            AssistantAction.MARK ->
+                strip?.stateDescription = "Mark to search selected. Waiting for screen."
+            AssistantAction.MUSIC -> openOverlay(null)
+            AssistantAction.TRANSLATE ->
+                handOff(
+                    Intent(context, CapturePermissionActivity::class.java)
+                        .setAction(CapturePermissionActivity.LIVE_TRANSLATE),
+                )
+            AssistantAction.CAMERA ->
+                handOff(Intent(context, MainActivity::class.java).setAction(MainActivity.CAMERA))
+        }
+    }
+
+    private fun openOverlay(error: String?, submitSearch: Boolean = false) {
+        if (stage != Stage.WAITING) return
+        handOff(
+            Intent(context, AssistantActivity::class.java)
+                .putExtra(AssistantEntry.CAPTURE_ERROR, error)
+                .putExtra(AssistantEntry.IMAGE_ID, imageId)
+                .putExtra(AssistantEntry.ACTION, selected?.name)
+                .putExtra(AssistantEntry.QUERY, strip?.query.orEmpty())
+                .putExtra(AssistantEntry.SUBMIT_SEARCH, submitSearch),
         )
+    }
+
+    private fun handOff(intent: Intent) {
+        if (stage != Stage.WAITING) return
+        stage = Stage.HANDED_OFF
+        handler.removeCallbacks(timeout)
+        try {
+            startAssistantActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
+        } catch (_: RuntimeException) {
+            imageId?.let(ImageSession::clear)
+        }
         finish()
     }
 
-    override fun onHide() {
+    override fun onBackPressed() {
+        if (stage != Stage.WAITING) return
+        stage = Stage.CLOSED
         handler.removeCallbacks(timeout)
+        imageId?.let(ImageSession::clear)
+        root?.fadeAssistantOut { finish() } ?: finish()
+    }
+
+    override fun onHide() {
+        val abandoned = stage == Stage.WAITING
+        if (abandoned) {
+            stage = Stage.CLOSED
+            imageId?.let(ImageSession::clear)
+        }
+        handler.removeCallbacks(timeout)
+        root?.animate()?.cancel()
         super.onHide()
+        // Hidden sessions can be reused by Android. Abandoned capture requests must terminate so
+        // the next gesture creates a fresh session instead of reusing a CLOSED bridge.
+        if (abandoned) finish()
     }
 
     override fun onDestroy() {
+        if (stage != Stage.HANDED_OFF) imageId?.let(ImageSession::clear)
+        stage = Stage.CLOSED
+        root?.animate()?.cancel()
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }

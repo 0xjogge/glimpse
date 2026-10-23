@@ -38,8 +38,11 @@ data class WorkspaceState(
 
 class GlimpseViewModel
 @JvmOverloads
-constructor(application: Application, private val assistantSession: Boolean = false) :
-    AndroidViewModel(application) {
+constructor(
+    application: Application,
+    private val assistantSession: Boolean = false,
+    private val assistantImageId: String? = null,
+) : AndroidViewModel(application) {
     val graph = (application as GlimpseApplication).graph
     val preferences =
         graph.preferences.values.stateIn(viewModelScope, SharingStarted.Eagerly, AppPreferences())
@@ -56,7 +59,10 @@ constructor(application: Application, private val assistantSession: Boolean = fa
         viewModelScope.launch {
             ImageSession.image
                 .filterNotNull()
-                .filter { it.assistantOnly == assistantSession }
+                .filter {
+                    it.assistantOnly == assistantSession &&
+                        (!assistantSession || it.id == assistantImageId)
+                }
                 .collect { image ->
                     recognitionJob?.cancel()
                     translationJob?.cancel()
@@ -345,7 +351,12 @@ constructor(application: Application, private val assistantSession: Boolean = fa
         frameTranslator.reset()
     }
 
-    /** Invoked serially by the camera analyzer. Live processing never uses a cloud provider. */
+    /** Clear current camera geometry/work while preserving reusable session translations. */
+    fun invalidateLive() {
+        frameTranslator.invalidate()
+    }
+
+    /** New camera frames supersede older work. Live processing never uses a cloud provider. */
     suspend fun analyzeFrame(bitmap: Bitmap) {
         val prefs = preferences.value
         frameTranslator.analyze(

@@ -35,6 +35,12 @@ object ImageSession {
     fun clear() {
         image.value = null
     }
+
+    /** Closing an older assistant must not discard a newer capture or an imported image. */
+    fun clear(imageId: String) {
+        val current = image.value ?: return
+        if (current.id == imageId) image.compareAndSet(current, null)
+    }
 }
 
 object Images {
