@@ -94,9 +94,10 @@ fun CameraScreen(
         prefs.source,
         prefs.target,
         prefs.ocrEngine,
+        prefs.script,
         prefs.translationEngine,
     ) {
-        model.resetLive()
+        model.invalidateLive()
     }
     DisposableEffect(permission, retry) {
         var disposed = false
@@ -168,6 +169,7 @@ fun CameraScreen(
         onDispose {
             disposed = true
             analysis?.clearAnalyzer()
+            model.invalidateLive()
             provider?.unbind(*bound)
             capture = null
             camera = null
@@ -187,13 +189,15 @@ fun CameraScreen(
                         size.width,
                         size.height,
                     )
-                drawTranslatedLines(
-                    placement,
-                    recognition.lines,
-                    live.translations,
-                    Color(0xFF18231C),
-                    Color(0xFFF0F8EF),
-                )
+                for (region in live.regions) {
+                    drawTranslatedLines(
+                        placement,
+                        listOf(region.source),
+                        mapOf(region.source.text to region.translatedText),
+                        Color(0xFF18231C),
+                        Color(0xFFF0F8EF),
+                    )
+                }
             }
         if (!permission || cameraError != null)
             Column(
