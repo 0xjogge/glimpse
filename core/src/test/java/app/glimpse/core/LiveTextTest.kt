@@ -23,6 +23,16 @@ class LiveTextTest {
     }
 
     @Test
+    fun scrollingTheSameTextClearsItsOldOverlayUntilTheNewPositionStabilizes() {
+        val stabilizer = LiveTextStabilizer()
+        stabilizer.update(listOf(line))
+        assertEquals(listOf(line), stabilizer.update(listOf(line)))
+        val scrolled = line.copy(bounds = ImageRegion(.1f, .5f, .9f, .6f))
+        assertTrue(stabilizer.update(listOf(scrolled)).isEmpty())
+        assertEquals(listOf(scrolled), stabilizer.update(listOf(scrolled)))
+    }
+
+    @Test
     fun cachedTextDoesNotLeakAcrossLanguagesOrEnginesAndEvictionIsBounded() {
         val cache = TranslationCache(2)
         cache.put("first", "ja", "en", "こんにちは", "Hello")

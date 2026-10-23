@@ -2,19 +2,27 @@ package app.glimpse.core
 
 /** Only stable, repeated text reaches translation. A disappearing line expires immediately. */
 class LiveTextStabilizer(private val repetitions: Int = 2) {
-    private var previous = emptyMap<String, Int>()
+    private var previous = emptyList<Pair<TextLine, Int>>()
 
     @Synchronized
     fun update(lines: List<TextLine>): List<TextLine> {
-        val counts =
-            lines.map { it.text.trim() }.distinct().associateWith { (previous[it] ?: 0) + 1 }
+        val counts = lines.map { line ->
+            val prior = previous.firstOrNull { (old, _) ->
+                old.text.trim() == line.text.trim() &&
+                    kotlin.math.abs(old.bounds.left - line.bounds.left) < .02f &&
+                    kotlin.math.abs(old.bounds.top - line.bounds.top) < .02f &&
+                    kotlin.math.abs(old.bounds.right - line.bounds.right) < .02f &&
+                    kotlin.math.abs(old.bounds.bottom - line.bounds.bottom) < .02f
+            }
+            line to ((prior?.second ?: 0) + 1)
+        }
         previous = counts
-        return lines.filter { (counts[it.text.trim()] ?: 0) >= repetitions }
+        return counts.filter { it.second >= repetitions }.map { it.first }
     }
 
     @Synchronized
     fun reset() {
-        previous = emptyMap()
+        previous = emptyList()
     }
 }
 

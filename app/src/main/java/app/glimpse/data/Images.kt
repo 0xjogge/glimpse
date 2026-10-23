@@ -21,14 +21,15 @@ data class CapturedImage(
     val bitmap: Bitmap,
     val origin: String,
     val id: String = UUID.randomUUID().toString(),
+    val assistantOnly: Boolean = false,
 )
 
 /** One ephemeral image; never put screenshots in Binder extras or the photo library. */
 object ImageSession {
     val image = MutableStateFlow<CapturedImage?>(null)
 
-    fun offer(bitmap: Bitmap, origin: String) {
-        image.value = CapturedImage(bitmap, origin)
+    fun offer(bitmap: Bitmap, origin: String, assistantOnly: Boolean = false) {
+        image.value = CapturedImage(bitmap, origin, assistantOnly = assistantOnly)
     }
 
     fun clear() {
