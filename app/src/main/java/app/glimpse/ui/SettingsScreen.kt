@@ -153,6 +153,8 @@ fun SettingsScreen(
                 )
             }
         }
+        SectionTitle("Music recognition")
+        app.glimpse.music.MusicSettings(model)
         SectionTitle("Appearance")
         Surface(shape = RoundedCornerShape(24.dp)) {
             Column {

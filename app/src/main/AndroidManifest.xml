@@ -2,6 +2,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <application
         android:name=".GlimpseApplication"
@@ -30,6 +35,13 @@
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
         <activity android:name=".search.VisualSearchActivity" android:exported="false" />
+        <activity android:name=".assistant.AssistantActivity" android:exported="false" android:theme="@style/Theme.Glimpse.Overlay" android:excludeFromRecents="true" android:taskAffinity="app.glimpse.assistant" />
+        <activity android:name=".assistant.CapturePermissionActivity" android:exported="false" android:theme="@style/Theme.Glimpse.Overlay" android:excludeFromRecents="true" />
+        <service android:name=".assistant.ScreenTranslationService" android:exported="false" android:foregroundServiceType="mediaProjection" />
+        <service android:name=".music.MusicCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone" />
+        <service android:name=".music.PlayingAppListener" android:exported="true" android:label="Playing app identification" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
         <activity android:name=".assistant.CaptureActivity" android:exported="false" android:theme="@style/Theme.Glimpse.Transparent" android:excludeFromRecents="true" />
         <service android:name=".assistant.GlimpseVoiceService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
             <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>

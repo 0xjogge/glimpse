@@ -23,6 +23,7 @@ data class AppPreferences(
     val theme: String = "system",
     val dynamicColor: Boolean = true,
     val wifiOnly: Boolean = true,
+    val musicMode: String = "offline_first",
     val customProviders: List<TemplateSearchProvider> = emptyList(),
 ) {
     val providers
@@ -53,6 +54,10 @@ class Preferences(context: Context) {
                     theme = p[stringPreferencesKey("theme")] ?: "system",
                     dynamicColor = p[booleanPreferencesKey("dynamicColor")] ?: true,
                     wifiOnly = p[booleanPreferencesKey("wifiOnly")] ?: true,
+                    musicMode =
+                        p[stringPreferencesKey("musicMode")]?.takeIf {
+                            it in listOf("offline_first", "offline_only", "online_only")
+                        } ?: "offline_first",
                     customProviders =
                         decodeProviders(p[stringPreferencesKey("customProviders")] ?: "[]"),
                 )

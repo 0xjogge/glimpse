@@ -6,10 +6,12 @@ Built for the Pixel 10 Pro, with Android 15+ support, Jetpack Compose, Material 
 
 ## What you can do
 
-- **Scan your screen:** choose Glimpse as your digital assistant, invoke your system assistant gesture, then circle an area or tap text. Refine the selection with its corner handles.
+- **Scan your screen:** invoke Glimpse as your digital assistant to open an unbranded, edge-lit overlay. Circle an area or tap text, then search, copy, or translate without manually taking or saving a screenshot.
 - **Copy and edit text:** recognize English, Japanese, and mixed-language images locally; copy selected words or entire passages.
 - **Translate photos and screenshots:** download language packs, translate on device, toggle translated overlays, or open a browser translator.
 - **Scan with the camera:** take a picture or switch to **Live translate**. Stable text is translated locally and overlaid on the preview.
+- **Live screen translation:** choose a single app in Android's capture dialog and translate it while scrolling. Display-over-apps access keeps translation labels and pause/stop controls above that app.
+- **Identify music:** listen through the microphone, internal phone audio (including headphones), or both. Use your own AudD API key online, or install reference packs for fully offline matching. Results preserve input sources and available media-session app attribution. See [song packs and catalogue availability](docs/song-packs.md).
 - **Search:** Google, Bing, and Kagi text searches; Google/Bing visual-search upload pages receive your selected crop. Add custom search or AI URL templates in Settings.
 - **Import and share:** Android photo picker, image share targets, Android's text-selection menu, and save/share selected crops.
 

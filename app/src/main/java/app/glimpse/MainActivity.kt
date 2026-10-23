@@ -40,6 +40,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent) {
         when (intent.action) {
+            SETTINGS -> model.page(Page.SETTINGS)
+            MODELS -> model.page(Page.MODELS)
             CAMERA -> {
                 model.home()
                 model.page(Page.CAMERA)
@@ -87,5 +89,7 @@ class MainActivity : ComponentActivity() {
         const val SCREEN = "app.glimpse.SCREEN"
         const val ASSIST = "app.glimpse.ASSIST"
         const val SETUP = "app.glimpse.SETUP"
+        const val SETTINGS = "app.glimpse.SETTINGS"
+        const val MODELS = "app.glimpse.MODELS"
     }
 }

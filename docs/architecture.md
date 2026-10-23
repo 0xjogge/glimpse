@@ -44,6 +44,16 @@ CameraX keeps only the latest analysis frame. Analysis is throttled, upright ima
 
 ## Android integration
 
-`GlimpseVoiceService`/`GlimpseSessionService` receive screenshots through the selected default-assistant role. The platform also requires a recognition-service component in assistant metadata; the visual-only implementation rejects speech requests and requests no microphone permission.
+`GlimpseVoiceService`/`GlimpseSessionService` receive screenshots through the selected default-assistant role. An unbranded capture bridge launches a translucent `AssistantActivity` with a normal Compose lifecycle, keyboard and result launchers. Its full-screen snapshot, selection geometry, finite edge-light animation and compact action bar preserve the underlying screen context. The platform-required speech recognition component remains visual-only; microphone recording is exclusively an explicitly started music feature.
 
-The assistant's native opening panel and Compose workspace expose the camera. Quick Settings uses immutable activity PendingIntents. The screen shortcut first dismisses its transparent entry activity so the assistant captures the underlying app. Protected/disabled screenshots produce an explanatory message while image/camera entry points remain usable.
+Assistant images are routed to an assistant-scoped ViewModel, so opening/closing the overlay does not replace or retain its screenshot in a background main-application workspace.
+
+The assistant overlay and Compose workspace expose the camera. Quick Settings uses immutable activity PendingIntents. The screen shortcut first dismisses its transparent entry activity so the assistant captures the underlying app. Protected/disabled screenshots leave search, music and camera actions available.
+
+`LiveTranslationController` in `core/` serializes frames, drops concurrent analysis, stabilizes text and geometry, bounds the translation cache, and uses generations to reject stale results after reset. The camera ViewModel and `ScreenTranslationService` own separate controllers. The screen service uses a per-session MediaProjection, ImageReader latest-frame capture, pass-through label window and separate pause/stop controls. App-only capture avoids self-recognition; a two-color edge signature detects accidental whole-display capture and pauses analysis. The label window is below Android's untrusted-touch opacity threshold so scrolling remains possible.
+
+## Music
+
+`core/Music.kt` defines songs, input evidence, replaceable `MusicRecognitionEngine` adapters, source-preserving result merging, portable FFT landmark extraction and offset-consistent offline matching. `MusicCaptureService` owns independent AudioRecord streams for microphone and allowed phone playback; it never mixes them or requests audio focus. The service bounds capture duration and supports cancellation, projection revocation and input-specific errors.
+
+The offline-first engine list tries `OfflinePackRecognition` before `AudDRecognition`. Offline-only sessions contain no network engine. Credentials are encrypted with Android Keystore. Pack downloads are checksummed, bounded, validated and atomically installed. Optional notification access supplies reported playing-app metadata; it is not presented as verified per-UID capture. See [pack format and catalogue findings](song-packs.md).

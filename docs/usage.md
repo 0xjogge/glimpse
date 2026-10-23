@@ -4,9 +4,13 @@
 
 Select Glimpse in **Android Settings → Apps → Default apps → Digital assistant app**. Allow screenshot access there, then use the assistant gesture/button configured on your phone. Exact gestures are controlled by GrapheneOS and navigation settings.
 
-Circle an area to select it, drag the corner handles to refine the crop, or tap a text line. **Select all** returns to the whole image. **Copy** copies the active Original/Translation result. The pencil corrects OCR text before searching or translating.
+The assistant opens a screen-sized overlay with a two-tone edge glow and a compact action bar. Circle an area, refine it with corner handles, or tap text. **Translate screen** translates the selection (or the whole screen); **Search** uses your preferred provider. Copy and image search appear in the result panel. Close returns to the underlying app. No screenshot is saved to your gallery.
+
+The full image workspace remains available for imports and camera stills. There, **Select all** returns to the whole image, **Copy** copies the active Original/Translation result, and the pencil corrects recognized text.
 
 The **camera icon in the top bar** switches directly to camera scanning. Images shared from other apps and photos chosen through the picker use the same workspace.
+
+The assistant's camera button is in its bottom bar; its overflow menu opens Settings and Offline languages.
 
 Some apps disable screenshots; Android's capture restrictions still apply. Glimpse offers camera/photo import when a screen is unavailable.
 
@@ -23,6 +27,18 @@ Press **Translate** for a readable result and translated text boxes on the image
 Open from the assistant camera button, app home, launcher shortcut, or **Scan camera** Quick Settings tile. Grant camera permission, then take a photo. Torch and zoom are available when supported.
 
 Switch to **Live translate** for on-device translation over the preview. Hold steady briefly so text can stabilize. Use the language button to change the target and the download icon to manage language packs. The copy button copies currently recognized camera text; the shutter freezes a high-resolution picture for detailed selection/search.
+
+## Live screen translation
+
+Open the assistant result panel with Translate, then choose **Live screen translate**. Allow display over other apps when prompted, and choose **one app** in Android's screen-sharing dialog. Use the chosen app full-screen; translations update after text stabilizes while you scroll. The floating controls pause/resume or stop translation. Android's capture indicator can also stop the session.
+
+Entire-display sharing includes Glimpse's overlays and is unsupported for live translation. Glimpse detects its edge signature and pauses if those overlays appear in captured frames. Stop and select a single app instead. Switching the capture target requires a new capture grant. Protected content remains subject to Android's restrictions. Apps that hide third-party overlays, including some Android Settings screens, also hide the translated labels and floating controls; Android's capture indicator remains available to stop the session.
+
+## Music
+
+Tap the music note in the assistant, select **Both**, **Phone**, or **Mic**, and press **Listen**. Music capture starts only after this action and stops automatically after a bounded session; Stop listening and the capture notification stop it early. Phone audio needs Android's capture approval and the same audio permission as microphone recording. A player may disable internal capture.
+
+Configure your AudD API key and recognition mode in **Settings → Music recognition**. Downloadable offline packs recognize only their indexed songs; there is currently no Glimpse-hosted popular-song catalogue. Optional notification access enables playing-app labels when matching media-session metadata is available. See [Offline music and song packs](song-packs.md).
 
 ## Search
 
