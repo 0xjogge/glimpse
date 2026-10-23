@@ -8,11 +8,19 @@ Tags use **`<feature>.<patch>-release`**. `0.1-release` produces version name `0
 
 Once `main` passes CI:
 
+For a full pre-tag check including model downloads and networking-disabled translation, run:
+
+```sh
+gh workflow run ci.yml -f download-models=true
+```
+
+Wait for that run to pass before tagging:
+
 ```sh
 git switch main
 git pull --ff-only
-git tag -a 0.1-release -m "Release 0.1"
-git push origin 0.1-release
+git tag -a 0.2-release -m "Release 0.2"
+git push origin 0.2-release
 ```
 
 The [release workflow](https://github.com/0xjogge/glimpse/actions/workflows/release.yml) validates tag ancestry/version, runs build/lint/unit/device checks (including real model download and networking-disabled translation), signs optimized APKs, checks their package/version/non-debuggable status, pinned certificate, native ABI/content parity, and 16 KB ELF/ZIP alignment, then uploads all five APKs to a draft before publishing it as stable/latest.
@@ -23,11 +31,11 @@ Published release assets are immutable in this workflow. Failed runs can resume 
 
 | Installer                             | Purpose                             |
 | ------------------------------------- | ----------------------------------- |
-| `glimpse-0.1-release.apk`             | Universal                           |
-| `glimpse-0.1-release-arm64-v8a.apk`   | Pixel 10 Pro / modern ARM64 phones  |
-| `glimpse-0.1-release-armeabi-v7a.apk` | ARM32                               |
-| `glimpse-0.1-release-x86_64.apk`      | 64-bit Intel / development emulator |
-| `glimpse-0.1-release-x86.apk`         | 32-bit Intel                        |
+| `glimpse-0.2-release.apk`             | Universal                           |
+| `glimpse-0.2-release-arm64-v8a.apk`   | Pixel 10 Pro / modern ARM64 phones  |
+| `glimpse-0.2-release-armeabi-v7a.apk` | ARM32                               |
+| `glimpse-0.2-release-x86_64.apk`      | 64-bit Intel / development emulator |
+| `glimpse-0.2-release-x86.apk`         | 32-bit Intel                        |
 
 All share `app.glimpse`, the same version code, and one permanent signing certificate, allowing compatible architecture/universal updates without losing data. Release notes include measured APK sizes. Native libraries must match the corresponding universal-build contents and 64-bit libraries must support 16 KB pages.
 
@@ -45,8 +53,8 @@ Build and inspect signed release APKs locally:
 
 ```sh
 nix develop --command python3 scripts/signing.py run \
-  ./gradlew :app:assembleRelease -PglimpseVersion=0.1 -PglimpseSplitApks=true
-nix develop --command python3 scripts/package-release.py 0.1-release
+  ./gradlew :app:assembleRelease -PglimpseVersion=0.2 -PglimpseSplitApks=true
+nix develop --command python3 scripts/package-release.py 0.2-release
 ```
 
 Verified installers are staged in `build/release/`. CI's `--check-build` mode inspects unsigned optimized outputs without staging or publishing them. Normal development leaves ABI splitting disabled; pass `glimpseSplitApks` only to release builds.
@@ -55,7 +63,7 @@ The optimized APK smoke helper installs a signed release on the development emul
 
 ```sh
 nix develop --command glimpse-emulator --headless -- \
-  python3 scripts/smoke-release.py build/release/glimpse-0.1-release-x86_64.apk
+  python3 scripts/smoke-release.py build/release/glimpse-0.2-release-x86_64.apk
 ```
 
 It replaces the development installation on that emulator because debug/release signing identities differ. The report and screenshots are saved under `build/reports/release-smoke/`.
@@ -66,7 +74,7 @@ Use Conventional Commit titles (`feat`, `fix`, `perf`, `refactor`, `docs`, `buil
 
 ```sh
 npm ci --ignore-scripts
-npm run release:notes -- 0.1-release HEAD
+npm run release:notes -- 0.2-release HEAD
 ```
 
 For subsequent releases append the previous published tag. Notes are written to `build/release-notes.md`; packaging can append download sizes with `--notes-file build/release-notes.md`.

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      download-models:
+        description: Download Japanese and verify translation with networking disabled
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -12,3 +17,5 @@ concurrency:
 jobs:
   verify:
     uses: ./.github/workflows/verify.yml
+    with:
+      download-models: ${{ github.event_name == 'workflow_dispatch' && inputs.download-models }}

@@ -202,7 +202,7 @@ class GlimpseDeviceTest {
         val crop = Images.shareCrop(context, Images.sample(), ImageRegion(.25f, .2f, .75f, .6f))
         val intent =
             Intent(context, VisualSearchActivity::class.java)
-                .putExtra("url", "https://www.google.com/imghp")
+                .putExtra("url", "https://fixture.invalid/")
                 .putExtra("provider", "Upload fixture")
                 .putExtra("crop", crop.toString())
         ActivityScenario.launch<VisualSearchActivity>(intent).use { scenario ->
