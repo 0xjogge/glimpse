@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val glimpseVersion = providers.gradleProperty("glimpseVersion").orElse("0.3").get()
+val glimpseVersion = providers.gradleProperty("glimpseVersion").orElse("0.4").get()
 
 require(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)").matches(glimpseVersion))
 
