@@ -103,7 +103,7 @@ jobs:
           target: default
           profile: pixel_6
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot
           script: python3 scripts/smoke-release.py "build/release/glimpse-$RELEASE_TAG-x86_64.apk"
       - name: Attach all assets to a draft, then publish
         env:
