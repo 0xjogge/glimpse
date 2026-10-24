@@ -34,15 +34,16 @@ class ReleaseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", side_effect=["1", launcher + app, b"diagnostic image"]) as commands:
             with self.assertRaisesRegex(RuntimeError, "unexpected ANR"):
                 ui.prepare_emulator(Path(directory))
-            self.assertFalse(any("broadcast" in call.args for call in commands.call_args_list))
+            self.assertFalse(any("force-stop" in call.args for call in commands.call_args_list))
 
     def test_bootstrap_recovery_records_evidence_and_requires_focus(self):
         launcher = "Window #1 Window{abc u0 Application Not Responding: com.android.launcher3}:\n isVisible=true\n"
         ready = "mCurrentFocus=Window{xyz u0 com.android.launcher3/.Launcher}\n"
-        with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", side_effect=["1", launcher, b"diagnostic image", "Broadcast completed", ready]) as commands:
+        with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", side_effect=["1", launcher, b"diagnostic image", "", "", ready]) as commands:
             self.assertTrue(ui.prepare_emulator(Path(directory)))
             self.assertEqual(launcher, (Path(directory) / "emulator-bootstrap-windows.txt").read_text())
-            commands.assert_any_call("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
+            commands.assert_any_call("shell", "am", "force-stop", "com.android.launcher3")
+            commands.assert_any_call("shell", "input", "keyevent", "KEYCODE_HOME")
         with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", return_value="0") as commands:
             self.assertFalse(ui.prepare_emulator(Path(directory)))
             self.assertEqual(1, commands.call_count)

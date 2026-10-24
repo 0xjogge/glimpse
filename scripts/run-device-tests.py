@@ -37,7 +37,7 @@ def main():
         command += ["-e", "class", args.test_class]
     command += ["app.glimpse.test/androidx.test.runner.AndroidJUnitRunner"]
     try:
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=900)
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", timeout=900)
         output = result.stdout
         success = result.returncode == 0 and tests_passed(output)
     except subprocess.TimeoutExpired as error:
@@ -47,7 +47,7 @@ def main():
         output += "\nInstrumentation timed out after 900 seconds.\n"
         success = False
     (reports / "instrumentation.txt").write_text(output)
-    logs = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, timeout=30)
+    logs = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, errors="replace", timeout=30)
     (reports / "logcat.txt").write_text(logs.stdout)
     print(output)
     if not success:

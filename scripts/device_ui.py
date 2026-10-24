@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 
 def adb(*args, text=True, check=True, timeout=30):
-    result = subprocess.run(["adb", *args], capture_output=True, text=text, check=check, timeout=timeout)
+    result = subprocess.run(["adb", *args], capture_output=True, text=text, errors="replace" if text else None, check=check, timeout=timeout)
     return result.stdout
 
 
@@ -36,8 +36,11 @@ def prepare_emulator(reports):
         raise RuntimeError(f"Emulator has unexpected ANR windows before testing: {sorted(errors)}")
     # The emulator runner injects MENU as soon as boot_completed is set. On a cold AOSP image
     # that can time out before Launcher owns focus, leaving its ANR dialog above every test.
-    adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
-    deadline = time.monotonic() + 15
+    # Restart only the affected launcher. A generic close-dialog broadcast can leave Home without
+    # a focused window after dismissing its error. Explicit HOME starts a fresh launcher task.
+    adb("shell", "am", "force-stop", "com.android.launcher3")
+    adb("shell", "input", "keyevent", "KEYCODE_HOME")
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         windows = adb("shell", "dumpsys", "window", "windows")
         if not visible_anrs(windows) and re.search(r"mCurrentFocus=Window\{[^}\n]+\}", windows):
