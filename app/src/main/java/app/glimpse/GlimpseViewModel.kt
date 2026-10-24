@@ -45,7 +45,11 @@ constructor(
 ) : AndroidViewModel(application) {
     val graph = (application as GlimpseApplication).graph
     val preferences =
-        graph.preferences.values.stateIn(viewModelScope, SharingStarted.Eagerly, AppPreferences())
+        graph.preferences.values.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            graph.currentPreferences.value,
+        )
     private val mutableState = MutableStateFlow(WorkspaceState())
     val state = mutableState.asStateFlow()
     private val frameTranslator = LiveTranslationController(graph.engines)

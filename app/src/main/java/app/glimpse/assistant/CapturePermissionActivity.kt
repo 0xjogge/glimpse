@@ -4,11 +4,15 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.drawable.ColorDrawable
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
+import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.Spinner
@@ -21,6 +25,9 @@ import app.glimpse.GlimpseApplication
 import app.glimpse.core.Language
 import app.glimpse.music.MusicCaptureService
 import app.glimpse.music.MusicSession
+import app.glimpse.ui.applyNativeTheme
+import app.glimpse.ui.nativeThemeColors
+import app.glimpse.ui.nativeThemeContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -86,8 +93,10 @@ class CapturePermissionActivity : ComponentActivity() {
 
     private fun explainOverlayAccess() {
         explanationKind = "overlay"
+        val prefs = (application as GlimpseApplication).graph.currentPreferences.value
+        val colors = nativeThemeColors(this, prefs)
         explanation =
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(nativeThemeContext(this, prefs))
                 .setTitle("Live screen translate")
                 .setMessage(
                     "Allow display over other apps so translations and stop controls can stay above the app you are using.",
@@ -104,6 +113,7 @@ class CapturePermissionActivity : ComponentActivity() {
                 .setNegativeButton("Cancel") { _, _ -> finish() }
                 .setOnCancelListener { finish() }
                 .show()
+                .apply { applyNativeTheme(colors) }
     }
 
     private fun showTranslationSetup() {
@@ -112,6 +122,8 @@ class CapturePermissionActivity : ComponentActivity() {
             val graph = (application as GlimpseApplication).graph
             val prefs = graph.preferences.values.first()
             if (isFinishing) return@launch
+            val themedContext = nativeThemeContext(this@CapturePermissionActivity, prefs)
+            val colors = nativeThemeColors(themedContext, prefs)
             val engine = graph.engines.translator(prefs.translationEngine)
             val toLanguages =
                 engine.languages.sortedWith(
@@ -126,20 +138,54 @@ class CapturePermissionActivity : ComponentActivity() {
                 )
             val fromLanguages = listOf(Language("auto", "Detect language")) + toLanguages
             val content =
-                LinearLayout(this@CapturePermissionActivity).apply {
+                LinearLayout(themedContext).apply {
                     orientation = LinearLayout.VERTICAL
                     val padding = (24 * resources.displayMetrics.density).toInt()
                     setPadding(padding, 0, padding, padding / 2)
                 }
             fun picker(label: String, languages: List<Language>, selected: String): Spinner {
-                content.addView(TextView(this@CapturePermissionActivity).apply { text = label })
-                return Spinner(this@CapturePermissionActivity).apply {
+                content.addView(
+                    TextView(themedContext).apply {
+                        text = label
+                        setTextColor(colors.foreground)
+                    },
+                )
+                return Spinner(themedContext, Spinner.MODE_DROPDOWN).apply {
+                    val spinner = this
+                    backgroundTintList = ColorStateList.valueOf(colors.accent)
+                    setPopupBackgroundDrawable(ColorDrawable(colors.surface))
                     adapter =
-                        ArrayAdapter(
-                            this@CapturePermissionActivity,
-                            android.R.layout.simple_spinner_dropdown_item,
-                            languages.map { it.name },
-                        )
+                        object :
+                            ArrayAdapter<String>(
+                                themedContext,
+                                android.R.layout.simple_spinner_dropdown_item,
+                                languages.map { it.name },
+                            ) {
+                            override fun getView(
+                                position: Int,
+                                convertView: View?,
+                                parent: ViewGroup,
+                            ): View =
+                                super.getView(position, convertView, parent).apply {
+                                    (this as TextView).setTextColor(colors.foreground)
+                                    setBackgroundColor(colors.surface)
+                                }
+
+                            override fun getDropDownView(
+                                position: Int,
+                                convertView: View?,
+                                parent: ViewGroup,
+                            ): View =
+                                super.getDropDownView(position, convertView, parent).apply {
+                                    val selected = position == spinner.selectedItemPosition
+                                    (this as TextView).setTextColor(
+                                        if (selected) colors.onSelection else colors.foreground,
+                                    )
+                                    setBackgroundColor(
+                                        if (selected) colors.selection else colors.surface,
+                                    )
+                                }
+                        }
                     setSelection(languages.indexOfFirst { it.tag == selected }.coerceAtLeast(0))
                     content.addView(this)
                 }
@@ -148,7 +194,7 @@ class CapturePermissionActivity : ComponentActivity() {
             val to = picker("To", toLanguages, prefs.target)
             val active = ScreenTranslationSession.state.value.active
             val builder =
-                AlertDialog.Builder(this@CapturePermissionActivity)
+                AlertDialog.Builder(themedContext)
                     .setTitle("Translate your screen")
                     .setMessage(
                         if (active) "Change languages for the current session."
@@ -193,7 +239,7 @@ class CapturePermissionActivity : ComponentActivity() {
                     )
                     finish()
                 }
-            explanation = builder.show()
+            explanation = builder.show().apply { applyNativeTheme(colors) }
         }
     }
 

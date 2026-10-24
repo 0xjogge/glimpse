@@ -1,11 +1,15 @@
 package app.glimpse.assistant
 
 import android.content.Context
-import android.content.res.Configuration
+import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.ShapeDrawable
+import android.graphics.drawable.shapes.Shape
 import android.text.InputType
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
@@ -14,6 +18,10 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.widget.doAfterTextChanged
+import app.glimpse.GlimpseApplication
+import app.glimpse.data.AppPreferences
+import app.glimpse.ui.NativeThemeColors
+import app.glimpse.ui.nativeThemeColors
 
 enum class AssistantAction(val label: String) {
     MARK("Mark to search"),
@@ -30,19 +38,20 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
     private val buttons = mutableMapOf<AssistantAction, TextView>()
     private val search = EditText(context)
     private val submit = ImageButton(context)
-    private val dark =
-        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-            Configuration.UI_MODE_NIGHT_YES
-    private val surface = if (dark) Color.rgb(27, 30, 30) else Color.rgb(248, 249, 246)
-    private val foregroundColor = if (dark) Color.rgb(236, 239, 235) else Color.rgb(27, 32, 29)
-    private val accent = if (dark) Color.rgb(59, 82, 74) else Color.rgb(212, 235, 222)
+    private var colors =
+        nativeThemeColors(
+            context,
+            (context.applicationContext as? GlimpseApplication)?.graph?.currentPreferences?.value
+                ?: AppPreferences(),
+        )
 
     var selectedAction: AssistantAction? = null
         set(value) {
             field = value
             buttons.forEach { (action, button) ->
                 button.isSelected = action == value
-                button.background = ripple(if (action == value) accent else Color.TRANSPARENT, 20f)
+                button.background =
+                    ripple(if (action == value) colors.selection else Color.TRANSPARENT, 20f)
             }
         }
 
@@ -58,15 +67,12 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
     init {
         orientation = VERTICAL
         setPadding(dp(8), dp(8), dp(8), dp(8))
-        background = shape(surface, 28f)
         elevation = dp(6).toFloat()
         val searchRow = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         search.apply {
             hint = "Search this screen…"
             contentDescription = "Search this screen"
             textSize = 16f
-            setTextColor(foregroundColor)
-            setHintTextColor(if (dark) Color.LTGRAY else Color.DKGRAY)
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
@@ -82,8 +88,31 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
         }
         searchRow.addView(search, LayoutParams(0, dp(48), 1f))
         submit.apply {
-            setImageResource(android.R.drawable.ic_menu_search)
-            imageTintList = android.content.res.ColorStateList.valueOf(foregroundColor)
+            // The platform's legacy bitmap has translucent gray ink even after tinting.
+            setImageDrawable(
+                ShapeDrawable(
+                        object : Shape() {
+                            override fun draw(canvas: Canvas, paint: Paint) {
+                                paint.isAntiAlias = true
+                                paint.style = Paint.Style.STROKE
+                                paint.strokeWidth = width * .1f
+                                paint.strokeCap = Paint.Cap.ROUND
+                                canvas.drawCircle(width * .42f, height * .42f, width * .27f, paint)
+                                canvas.drawLine(
+                                    width * .62f,
+                                    height * .62f,
+                                    width * .87f,
+                                    height * .87f,
+                                    paint,
+                                )
+                            }
+                        },
+                    )
+                    .apply {
+                        intrinsicWidth = dp(24)
+                        intrinsicHeight = dp(24)
+                    },
+            )
             contentDescription = "Search"
             background = ripple(Color.TRANSPARENT, 24f)
             setOnClickListener { onSearch(query) }
@@ -99,7 +128,6 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
                     textSize = 12f
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     gravity = Gravity.CENTER
-                    setTextColor(foregroundColor)
                     setPadding(dp(4), dp(8), dp(4), dp(8))
                     minHeight = dp(48)
                     isClickable = true
@@ -123,6 +151,41 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
         addView(actions, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         // The bridge should not summon the keyboard just by becoming visible.
         isFocusableInTouchMode = true
+        applyColors()
+    }
+
+    /** Recolors existing controls without replacing the EditText or disturbing focus/the IME. */
+    fun setColors(colors: NativeThemeColors) {
+        if (this.colors == colors) return
+        this.colors = colors
+        applyColors()
+    }
+
+    private fun applyColors() {
+        background = shape(colors.surface, 28f)
+        val foreground =
+            ColorStateList(
+                arrayOf(
+                    intArrayOf(-android.R.attr.state_enabled),
+                    intArrayOf(android.R.attr.state_selected),
+                    intArrayOf(),
+                ),
+                intArrayOf(colors.disabled, colors.onSelection, colors.foreground),
+            )
+        search.setTextColor(foreground)
+        search.setHintTextColor(colors.secondary)
+        search.setLinkTextColor(colors.accent)
+        search.highlightColor =
+            androidx.core.graphics.ColorUtils.setAlphaComponent(colors.accent, 80)
+        search.textCursorDrawable =
+            search.textCursorDrawable?.mutate()?.apply { setTint(colors.accent) }
+        search.textSelectHandleLeft?.mutate()?.setTint(colors.accent)
+        search.textSelectHandleRight?.mutate()?.setTint(colors.accent)
+        search.textSelectHandle?.mutate()?.setTint(colors.accent)
+        submit.imageTintList = foreground
+        submit.background = ripple(Color.TRANSPARENT, 24f)
+        buttons.values.forEach { it.setTextColor(foreground) }
+        selectedAction = selectedAction
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
@@ -135,7 +198,7 @@ class AssistantActionStrip(context: Context) : LinearLayout(context) {
 
     private fun ripple(color: Int, radius: Float) =
         RippleDrawable(
-            android.content.res.ColorStateList.valueOf(0x20808080),
+            ColorStateList.valueOf(colors.ripple),
             shape(color, radius),
             shape(Color.WHITE, radius),
         )

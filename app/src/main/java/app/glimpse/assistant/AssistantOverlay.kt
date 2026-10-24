@@ -37,6 +37,7 @@ import app.glimpse.data.Images
 import app.glimpse.search.VisualSearchActivity
 import app.glimpse.ui.LanguageDialog
 import app.glimpse.ui.SelectableImage
+import app.glimpse.ui.toNativeThemeColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -53,6 +54,7 @@ fun AssistantOverlay(
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val nativeColors = MaterialTheme.colorScheme.toNativeThemeColors()
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var language by remember { mutableStateOf<String?>(null) }
@@ -148,7 +150,8 @@ fun AssistantOverlay(
             } else if (expanded || state.message != null) {
                 Surface(
                     shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                 ) {
                     Column(
                         Modifier.padding(16.dp),
@@ -290,6 +293,7 @@ fun AssistantOverlay(
                 factory = { AssistantActionStrip(it) },
                 modifier = Modifier.fillMaxWidth().wrapContentHeight(),
                 update = { strip ->
+                    strip.setColors(nativeColors)
                     strip.onQueryChanged = { query = it }
                     strip.query = query
                     strip.selectedAction = AssistantAction.entries.firstOrNull { it.name == mode }

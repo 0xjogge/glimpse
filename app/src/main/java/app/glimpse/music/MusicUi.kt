@@ -36,7 +36,8 @@ fun MusicPanel(onClose: () -> Unit) {
     var input by remember { mutableStateOf("both") }
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Column(
             Modifier.padding(16.dp).heightIn(max = 400.dp).verticalScroll(rememberScrollState()),

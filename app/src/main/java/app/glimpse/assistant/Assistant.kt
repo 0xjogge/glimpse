@@ -3,6 +3,7 @@ package app.glimpse.assistant
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -18,10 +19,17 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
+import app.glimpse.GlimpseApplication
 import app.glimpse.MainActivity
 import app.glimpse.R
 import app.glimpse.data.CapturedImage
 import app.glimpse.data.ImageSession
+import app.glimpse.ui.nativeThemeColors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class GlimpseVoiceService : VoiceInteractionService() {
     override fun onReady() {
@@ -64,6 +72,9 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val themeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val preferences =
+        (context.applicationContext as GlimpseApplication).graph.currentPreferences
     private var stage = Stage.WAITING
     private var root: FrameLayout? = null
     private var strip: AssistantActionStrip? = null
@@ -75,6 +86,9 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
 
     init {
         setTheme(R.style.Theme_Glimpse_Overlay)
+        themeScope.launch {
+            preferences.collect { prefs -> strip?.setColors(nativeThemeColors(context, prefs)) }
+        }
     }
 
     // Native controls are immediately usable while the system is still delivering its screenshot.
@@ -84,6 +98,7 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
         val margin = (16 * density).toInt()
         val actions =
             AssistantActionStrip(context).apply {
+                setColors(nativeThemeColors(context, preferences.value))
                 selectedAction = selected
                 onAction = ::selectAction
                 onSearch = { openOverlay(null, submitSearch = true) }
@@ -145,6 +160,11 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
         root?.requestApplyInsets()
         handler.removeCallbacks(timeout)
         handler.postDelayed(timeout, 1600)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        strip?.setColors(nativeThemeColors(context, preferences.value))
     }
 
     override fun onHandleScreenshot(screenshot: Bitmap?) {
@@ -226,6 +246,7 @@ private class GlimpseSession(context: android.content.Context) : VoiceInteractio
     }
 
     override fun onDestroy() {
+        themeScope.cancel()
         if (stage != Stage.HANDED_OFF) imageId?.let(ImageSession::clear)
         stage = Stage.CLOSED
         root?.animate()?.cancel()
