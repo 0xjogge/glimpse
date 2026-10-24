@@ -13,6 +13,39 @@ def adb(*args, text=True, check=True, timeout=30):
     return result.stdout
 
 
+def visible_anrs(windows):
+    packages = set()
+    for window in re.split(r"\n\s*Window #\d+ ", windows):
+        match = re.search(r"Application Not Responding:\s*([\w.]+)", window.partition("\n")[0])
+        if match and "isVisible=true" in window:
+            packages.add(match.group(1))
+    return packages
+
+
+def prepare_emulator(reports):
+    """Recover only a known boot-time launcher ANR before running any app tests."""
+    if adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
+        return False
+    windows = adb("shell", "dumpsys", "window", "windows")
+    errors = visible_anrs(windows)
+    if not errors:
+        return False
+    (reports / "emulator-bootstrap-windows.txt").write_text(windows)
+    (reports / "emulator-bootstrap.png").write_bytes(adb("exec-out", "screencap", "-p", text=False))
+    if errors != {"com.android.launcher3"}:
+        raise RuntimeError(f"Emulator has unexpected ANR windows before testing: {sorted(errors)}")
+    # The emulator runner injects MENU as soon as boot_completed is set. On a cold AOSP image
+    # that can time out before Launcher owns focus, leaving its ANR dialog above every test.
+    adb("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        windows = adb("shell", "dumpsys", "window", "windows")
+        if not visible_anrs(windows) and re.search(r"mCurrentFocus=Window\{[^}\n]+\}", windows):
+            return True
+        time.sleep(.3)
+    raise RuntimeError("Emulator launcher did not recover focus; see bootstrap diagnostics")
+
+
 def hierarchy():
     output = adb("exec-out", "uiautomator", "dump", "/dev/tty")
     start = output.index("<?xml")

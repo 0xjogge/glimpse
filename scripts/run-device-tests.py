@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 import re
 import subprocess
+from device_ui import prepare_emulator
 
 
 def tests_passed(output):
@@ -27,6 +28,8 @@ def main():
         if len(matches) != 1:
             parser.error(f"Expected exactly one {name}, found {len(matches)}")
         subprocess.run(["adb", "install", "-r", str(matches[0])], check=True)
+    if prepare_emulator(reports):
+        print("Recovered the emulator's boot-time launcher ANR before instrumentation")
     command = ["adb", "shell", "am", "instrument", "-w", "-r"]
     if args.download_models:
         command += ["-e", "downloadModels", "true"]

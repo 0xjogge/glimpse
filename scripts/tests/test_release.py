@@ -5,6 +5,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -25,6 +26,27 @@ ui = load("device_ui", SCRIPTS / "device_ui.py")
 
 
 class ReleaseTest(unittest.TestCase):
+    def test_bootstrap_recovery_is_scoped_to_visible_launcher_anr(self):
+        launcher = "Window #1 Window{abc u0 Application Not Responding: com.android.launcher3}:\n isVisible=true\n"
+        app = "Window #2 Window{def u0 Application Not Responding: app.glimpse}:\n isVisible=true\n"
+        hidden = "Window #3 Window{ghi u0 Application Not Responding: other.app}:\n isVisible=false\n"
+        self.assertEqual({"com.android.launcher3", "app.glimpse"}, ui.visible_anrs(launcher + app + hidden))
+        with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", side_effect=["1", launcher + app, b"diagnostic image"]) as commands:
+            with self.assertRaisesRegex(RuntimeError, "unexpected ANR"):
+                ui.prepare_emulator(Path(directory))
+            self.assertFalse(any("broadcast" in call.args for call in commands.call_args_list))
+
+    def test_bootstrap_recovery_records_evidence_and_requires_focus(self):
+        launcher = "Window #1 Window{abc u0 Application Not Responding: com.android.launcher3}:\n isVisible=true\n"
+        ready = "mCurrentFocus=Window{xyz u0 com.android.launcher3/.Launcher}\n"
+        with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", side_effect=["1", launcher, b"diagnostic image", "Broadcast completed", ready]) as commands:
+            self.assertTrue(ui.prepare_emulator(Path(directory)))
+            self.assertEqual(launcher, (Path(directory) / "emulator-bootstrap-windows.txt").read_text())
+            commands.assert_any_call("shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS")
+        with tempfile.TemporaryDirectory() as directory, patch.object(ui, "adb", return_value="0") as commands:
+            self.assertFalse(ui.prepare_emulator(Path(directory)))
+            self.assertEqual(1, commands.call_count)
+
     def test_enabled_child_label_cannot_bypass_disabled_control(self):
         root = ET.fromstring('<hierarchy><node enabled="false"><node text="Translation" enabled="true" /></node></hierarchy>')
         self.assertIsNotNone(ui.find_in_tree(root, "Translation"))

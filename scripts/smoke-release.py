@@ -9,7 +9,7 @@ import struct
 import time
 import xml.etree.ElementTree as ET
 
-from device_ui import adb, bounds, find_in_tree, hierarchy, tap, wait_for
+from device_ui import adb, bounds, find_in_tree, hierarchy, prepare_emulator, tap, wait_for
 
 
 def main():
@@ -90,6 +90,8 @@ def main():
         adb("shell", "pm", "grant", "app.glimpse", "android.permission.CAMERA")
         adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         adb("shell", "wm", "dismiss-keyguard")
+        if prepare_emulator(reports):
+            steps.append("Recovered the emulator's boot-time launcher ANR before app checks")
         adb("shell", "am", "start", "-W", "-n", "app.glimpse/.MainActivity")
         wait_for("A closer look.")
         snapshot("home")
