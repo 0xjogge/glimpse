@@ -218,6 +218,9 @@ class GlimpseDeviceTest {
             var browser: WebView? = null
             val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
             while (browser == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+                // Browser startup follows the first focused frame, rather than blocking the
+                // activity handoff. Advance the Compose test clock for that recomposition.
+                compose.waitForIdle()
                 scenario.onActivity { browser = findBrowser(it.window.decorView) }
                 android.os.SystemClock.sleep(100)
             }

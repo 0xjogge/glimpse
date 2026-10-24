@@ -28,6 +28,7 @@ import app.glimpse.ui.GlimpseTheme
 /** Uses provider-owned upload pages instead of private upload APIs or a public image host. */
 class VisualSearchActivity : ComponentActivity() {
     private var webView: WebView? = null
+    private var browserReady by mutableStateOf(false)
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,7 +110,8 @@ class VisualSearchActivity : ComponentActivity() {
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                        if (progress < 100)
+                        if (!browserReady) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        else if (progress < 100)
                             LinearProgressIndicator(
                                 progress = { progress / 100f },
                                 Modifier.fillMaxWidth(),
@@ -129,80 +131,80 @@ class VisualSearchActivity : ComponentActivity() {
                                 Text("Try again")
                             }
                         }
-                        AndroidView(
-                            factory = { context ->
-                                WebView(context).apply {
-                                    webView = this
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.allowFileAccess = false
-                                    settings.allowContentAccess = true
-                                    settings.mixedContentMode =
-                                        WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                    // Desktop upload controls are available without requiring
-                                    // provider apps.
-                                    settings.userAgentString =
-                                        settings.userAgentString
-                                            .replace("; wv", "")
-                                            .replace("Android", "X11; Linux x86_64")
-                                            .replace("Mobile", "")
-                                    settings.useWideViewPort = true
-                                    settings.loadWithOverviewMode = true
-                                    CookieManager.getInstance()
-                                        .setAcceptThirdPartyCookies(this, false)
-                                    webChromeClient =
-                                        object : WebChromeClient() {
-                                            override fun onProgressChanged(
-                                                view: WebView?,
-                                                newProgress: Int,
-                                            ) {
-                                                progress = newProgress
-                                                canBack = canGoBack()
-                                            }
-
-                                            override fun onShowFileChooser(
-                                                view: WebView?,
-                                                callback: ValueCallback<Array<Uri>>,
-                                                params: FileChooserParams?,
-                                            ): Boolean {
-                                                // Complete after the chooser callback has unwound,
-                                                // as
-                                                // with an ActivityResult. Re-entrant completion can
-                                                // invalidate Chromium's pending chooser state.
-                                                view?.post {
-                                                    callback.onReceiveValue(arrayOf(crop))
+                        if (browserReady)
+                            AndroidView(
+                                factory = { context ->
+                                    WebView(context).apply {
+                                        webView = this
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.allowFileAccess = false
+                                        settings.allowContentAccess = true
+                                        settings.mixedContentMode =
+                                            WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                        // Desktop upload controls are available without requiring
+                                        // provider apps.
+                                        settings.userAgentString =
+                                            settings.userAgentString
+                                                .replace("; wv", "")
+                                                .replace("Android", "X11; Linux x86_64")
+                                                .replace("Mobile", "")
+                                        settings.useWideViewPort = true
+                                        settings.loadWithOverviewMode = true
+                                        CookieManager.getInstance()
+                                            .setAcceptThirdPartyCookies(this, false)
+                                        webChromeClient =
+                                            object : WebChromeClient() {
+                                                override fun onProgressChanged(
+                                                    view: WebView?,
+                                                    newProgress: Int,
+                                                ) {
+                                                    progress = newProgress
+                                                    canBack = canGoBack()
                                                 }
-                                                return true
-                                            }
-                                        }
-                                    webViewClient =
-                                        object : WebViewClient() {
-                                            override fun shouldOverrideUrlLoading(
-                                                view: WebView?,
-                                                request: WebResourceRequest?,
-                                            ): Boolean =
-                                                request?.url?.scheme !in
-                                                    setOf("https", "about", "blob")
 
-                                            override fun onReceivedError(
-                                                view: WebView?,
-                                                request: WebResourceRequest?,
-                                                failure: WebResourceError?,
-                                            ) {
-                                                if (request?.isForMainFrame == true)
-                                                    error =
-                                                        "Could not load $name. Check your connection and try again."
+                                                override fun onShowFileChooser(
+                                                    view: WebView?,
+                                                    callback: ValueCallback<Array<Uri>>,
+                                                    params: FileChooserParams?,
+                                                ): Boolean {
+                                                    // Return the crop asynchronously, matching
+                                                    // ActivityResult and avoiding a re-entrant
+                                                    // Chromium chooser callback.
+                                                    view?.post {
+                                                        callback.onReceiveValue(arrayOf(crop))
+                                                    }
+                                                    return true
+                                                }
                                             }
-                                        }
-                                    if (
-                                        savedInstanceState == null ||
-                                            restoreState(savedInstanceState) == null
-                                    )
-                                        loadUrl(url)
-                                }
-                            },
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
+                                        webViewClient =
+                                            object : WebViewClient() {
+                                                override fun shouldOverrideUrlLoading(
+                                                    view: WebView?,
+                                                    request: WebResourceRequest?,
+                                                ): Boolean =
+                                                    request?.url?.scheme !in
+                                                        setOf("https", "about", "blob")
+
+                                                override fun onReceivedError(
+                                                    view: WebView?,
+                                                    request: WebResourceRequest?,
+                                                    failure: WebResourceError?,
+                                                ) {
+                                                    if (request?.isForMainFrame == true)
+                                                        error =
+                                                            "Could not load $name. Check your connection and try again."
+                                                }
+                                            }
+                                        if (
+                                            savedInstanceState == null ||
+                                                restoreState(savedInstanceState) == null
+                                        )
+                                            loadUrl(url)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                            )
                     }
                 }
             }
@@ -212,6 +214,16 @@ class VisualSearchActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         webView?.saveState(outState)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !browserReady)
+            window.decorView.postOnAnimation {
+                // A cold system WebView can take seconds to initialize. Complete the previous
+                // window's focus handoff and draw this activity's shell before starting it.
+                if (!isFinishing && !isDestroyed) browserReady = true
+            }
     }
 
     override fun onDestroy() {
