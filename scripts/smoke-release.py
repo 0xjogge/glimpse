@@ -4,6 +4,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import struct
 import time
 import xml.etree.ElementTree as ET
@@ -49,34 +50,35 @@ def main():
             raise RuntimeError("Expected an RGBA8888 emulator screencap")
         return width, height, memoryview(raw)[header:]
 
-    def dark_fraction(rect):
+    def region_pixels(rect):
         width, height, pixels = screen_pixels()
         left, top, right, bottom = rect
-        dark = total = 0
+        result = []
         for y in range(max(0, top), min(height, bottom), 2):
             for x in range(max(0, left), min(width, right), 2):
                 offset = (y * width + x) * 4
-                dark += pixels[offset] < 125 and pixels[offset + 1] < 145 and pixels[offset + 2] < 145
-                total += 1
-        return dark / max(1, total)
+                result.append(tuple(pixels[offset:offset + 3]))
+        return result
 
     def dock_bounds():
-        # The legacy `uiautomator dump` reads only the active window, excluding a pass-through
-        # non-focusable dock. Find its opaque background in the actual compositor output instead.
-        width, height, pixels = screen_pixels()
-        rows = []
-        for y in range(height * 55 // 100, height):
-            offset = (y * width + width // 2) * 4
-            if all(abs(pixels[offset + channel] - color) < 12 for channel, color in enumerate((24, 35, 30))):
-                rows.append(y)
-        if len(rows) < height * .03:
-            return None
-        return width, height, min(rows), max(rows)
+        # The active-window accessibility dump omits this non-focusable window. Read its actual
+        # WindowManager bounds, independent of wallpaper colors and the app's light/dark theme.
+        for window in re.split(r"\n\s*Window #\d+ ", adb("shell", "dumpsys", "window", "windows")):
+            if "Glimpse translation controls" not in window.partition("\n")[0] or "isVisible=true" not in window:
+                continue
+            frame = re.search(r"\bframe=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", window)
+            if frame:
+                width, height, _ = screen_pixels()
+                _, top, _, bottom = map(int, frame.groups())
+                return width, height, top, bottom
+        return None
 
     def wait_rendered(rect, baseline, translated):
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
-            visible = dark_fraction(rect) > baseline + .2
+            current = region_pixels(rect)
+            changed = sum(max(abs(a - b) for a, b in zip(before, after)) >= 24 for before, after in zip(baseline, current))
+            visible = changed / max(1, len(current)) > .2
             if visible == translated:
                 return
             time.sleep(.3)
@@ -198,7 +200,7 @@ def main():
         left, top, right, bottom = bounds(source)
         width, height, _ = screen_pixels()
         source_rect = (left, top, min(right, left + width * 22 // 100), min(bottom, top + height * 35 // 1000))
-        original_darkness = dark_fraction(source_rect)
+        original_pixels = region_pixels(source_rect)
         adb("shell", "input", "keyevent", "KEYCODE_ASSIST")
         tap("Translate")
         wait_for("Translate your screen")
@@ -206,7 +208,7 @@ def main():
         tap("Japanese")
         positive_button("app.glimpse")
         positive_button("com.android.systemui")
-        wait_rendered(source_rect, original_darkness, True)
+        wait_rendered(source_rect, original_pixels, True)
         dock = dock_bounds()
         if dock is None:
             raise RuntimeError("Live translation dock was not rendered")
@@ -214,9 +216,9 @@ def main():
         controls_y = round(dock_bottom - width / 411 * 32)
         snapshot("live-whole-screen")
         adb("shell", "input", "tap", str(width // 2), str(controls_y))
-        wait_rendered(source_rect, original_darkness, False)
+        wait_rendered(source_rect, original_pixels, False)
         adb("shell", "input", "tap", str(width // 2), str(controls_y))
-        wait_rendered(source_rect, original_darkness, True)
+        wait_rendered(source_rect, original_pixels, True)
         adb("shell", "input", "tap", str(width * 4 // 5), str(controls_y))
         deadline = time.monotonic() + 15
         while dock_bounds() is not None:

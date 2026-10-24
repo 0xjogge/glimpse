@@ -3,9 +3,11 @@ package app.glimpse.assistant
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -29,6 +31,9 @@ import android.widget.TextView
 import app.glimpse.GlimpseApplication
 import app.glimpse.core.*
 import app.glimpse.data.AppPreferences
+import app.glimpse.ui.NativeThemeColors
+import app.glimpse.ui.nativeThemeColors
+import app.glimpse.ui.nativeThemeContext
 import java.util.Locale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -53,6 +58,8 @@ class ScreenTranslationService : Service() {
     private var pauseButton: Button? = null
     private var originalButton: Button? = null
     private var downloadButton: Button? = null
+    private var stopButton: Button? = null
+    private lateinit var colors: NativeThemeColors
     private var paused = false
     private var original = false
     private var showing = false
@@ -91,6 +98,7 @@ class ScreenTranslationService : Service() {
         val sample: IntArray,
         val contaminated: Boolean,
         val bitmap: Bitmap?,
+        val ignored: Rect,
     )
 
     override fun onBind(intent: Intent?) = null
@@ -127,6 +135,8 @@ class ScreenTranslationService : Service() {
             )
             windows = getSystemService(WindowManager::class.java)
             val graph = (application as GlimpseApplication).graph
+            prefs = graph.currentPreferences.value
+            colors = nativeThemeColors(this, prefs)
             translator = LiveTranslationController(graph.engines)
             captureThread.start()
             capture = Handler(captureThread.looper)
@@ -134,9 +144,13 @@ class ScreenTranslationService : Service() {
             scope.launch {
                 graph.preferences.values.collect { next ->
                     val changed = options(prefs) != options(next)
+                    val nextColors = nativeThemeColors(this@ScreenTranslationService, next)
+                    val themeChanged = colors != nextColors
                     prefs = next
-                    if (changed) {
-                        translator.invalidate(clearCache = true)
+                    colors = nextColors
+                    if (themeChanged) applyDockColors()
+                    if (changed || themeChanged) {
+                        translator.invalidate(clearCache = changed)
                         acquireCleanScene()
                     }
                     updateControls()
@@ -204,6 +218,12 @@ class ScreenTranslationService : Service() {
         super.onConfigurationChanged(newConfig)
         if (stopped || !::windows.isInitialized) return
         updateCaptureInsets()
+        val nextColors = nativeThemeColors(this, prefs)
+        if (nextColors != colors) {
+            colors = nextColors
+            applyDockColors()
+            acquireCleanScene()
+        }
         controls?.let { view ->
             val density = resources.displayMetrics.density
             val params = view.layoutParams as WindowManager.LayoutParams
@@ -249,8 +269,7 @@ class ScreenTranslationService : Service() {
                             val ignored = Rect(dock)
                             val contaminated = containsPresentation(image)
                             val sample = sample(image, ignored)
-                            val bitmap =
-                                if (hidden && !contaminated) copyClean(image, ignored) else null
+                            val bitmap = if (hidden && !contaminated) copySource(image) else null
                             if (!stopped && token == epoch)
                                 frames.trySend(
                                     Frame(
@@ -260,6 +279,7 @@ class ScreenTranslationService : Service() {
                                         sample,
                                         contaminated,
                                         bitmap,
+                                        ignored,
                                     ),
                                 )
                         }
@@ -446,17 +466,50 @@ class ScreenTranslationService : Service() {
             updateControls()
             analysis = scope.launch {
                 withContext(Dispatchers.Default) {
-                    translator.analyze(clean.bitmap!!, options(prefs), settled = true)
+                    val source = clean.bitmap!!
+                    val scale = minOf(1f, 1440f / maxOf(source.width, source.height))
+                    val ocrImage =
+                        if (scale < 1)
+                            Bitmap.createScaledBitmap(
+                                source,
+                                (source.width * scale).toInt().coerceAtLeast(1),
+                                (source.height * scale).toInt().coerceAtLeast(1),
+                                true,
+                            )
+                        else source.copy(Bitmap.Config.ARGB_8888, true)
+                    // Mask only OCR input. Covering pixels need the unmodified native capture,
+                    // including source glyphs next to the dock's exclusion margin.
+                    Canvas(ocrImage).apply {
+                        val mask = Paint().apply { color = BACKGROUND }
+                        drawRect(
+                            RectF(clean.ignored).apply {
+                                left *= scale
+                                top *= scale
+                                right *= scale
+                                bottom *= scale
+                            },
+                            mask,
+                        )
+                        drawRect(0f, 0f, ocrImage.width.toFloat(), screenTop * scale, mask)
+                        drawRect(
+                            0f,
+                            (source.height - screenBottom) * scale,
+                            ocrImage.width.toFloat(),
+                            ocrImage.height.toFloat(),
+                            mask,
+                        )
+                    }
+                    translator.analyze(ocrImage, options(prefs), settled = true)
                 }
                 if (current != scene || clean.epoch != epoch || paused) return@launch
                 result = translator.state.value
                 completedScene = current
-                showResult()
+                showResult(clean)
             }
         }
     }
 
-    private fun showResult() {
+    private fun showResult(clean: Frame) {
         phase = result.status
         if (!original && !paused) {
             showing = true
@@ -465,6 +518,7 @@ class ScreenTranslationService : Service() {
             cleanReference = baseline
             baseline = null
             labels?.apply {
+                source = clean.bitmap
                 state = result
                 expectedPresentation = cleanReference?.let(::expectedSample)
                 visibility = View.VISIBLE
@@ -560,32 +614,34 @@ class ScreenTranslationService : Service() {
                             PixelFormat.TRANSLUCENT,
                         )
                         .apply {
-                            alpha = .75f // Below Android's combined untrusted-touch opacity limit.
+                            title = "Glimpse translation labels"
+                            alpha = TranslationLabelCover.WINDOW_ALPHA
                             setFitInsetsTypes(0)
                             layoutInDisplayCutoutMode =
                                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                         },
                 )
             }
+        val themedContext = nativeThemeContext(this, prefs)
         val dockView =
-            LinearLayout(this).apply {
+            LinearLayout(themedContext).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), dp(4), dp(12), dp(8))
                 background =
                     GradientDrawable().apply {
-                        setColor(BACKGROUND)
+                        setColor(this@ScreenTranslationService.colors.surface)
                         cornerRadius = dp(24).toFloat()
                     }
                 elevation = dp(6).toFloat()
             }
         fun button(text: String, action: () -> Unit) =
-            Button(this).apply {
+            Button(themedContext).apply {
                 this.text = text
                 textSize = 12f
                 minWidth = 0
                 minimumWidth = 0
                 minHeight = dp(48)
-                setTextColor(Color.WHITE)
+                setTextColor(colors.foreground)
                 setBackgroundColor(Color.TRANSPARENT)
                 setOnClickListener { action() }
             }
@@ -601,9 +657,9 @@ class ScreenTranslationService : Service() {
                 }
                 .also { dockView.addView(it, LinearLayout.LayoutParams(-1, dp(48))) }
         status =
-            TextView(this)
+            TextView(themedContext)
                 .apply {
-                    setTextColor(Color.LTGRAY)
+                    setTextColor(colors.secondary)
                     textSize = 12f
                     gravity = Gravity.CENTER
                     maxLines = 2
@@ -615,11 +671,13 @@ class ScreenTranslationService : Service() {
         val buttons = LinearLayout(this)
         originalButton = button("Original") { command(ORIGINAL) }
         pauseButton = button("Pause") { command(PAUSE) }
-        listOf(originalButton!!, pauseButton!!, button("Stop") { stopSelf() }).forEach {
+        stopButton = button("Stop") { stopSelf() }
+        listOf(originalButton!!, pauseButton!!, stopButton!!).forEach {
             buttons.addView(it, LinearLayout.LayoutParams(0, dp(48), 1f))
         }
         dockView.addView(buttons)
         controls = dockView
+        applyDockColors()
         val params =
             WindowManager.LayoutParams(
                     minOf(windows.maximumWindowMetrics.bounds.width() - dp(32), dp(400)),
@@ -629,6 +687,7 @@ class ScreenTranslationService : Service() {
                     PixelFormat.TRANSLUCENT,
                 )
                 .apply {
+                    title = "Glimpse translation controls"
                     gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                     y = dp(16)
                 }
@@ -654,6 +713,31 @@ class ScreenTranslationService : Service() {
         }
         windows.addView(dockView, params)
         updateControls()
+    }
+
+    private fun applyDockColors() {
+        (controls?.background as? GradientDrawable)?.setColor(colors.surface)
+        status?.setTextColor(colors.secondary)
+        val text =
+            ColorStateList(
+                arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+                intArrayOf(colors.disabled, colors.foreground),
+            )
+        listOf(pair, pauseButton, originalButton, downloadButton, stopButton).forEach { button ->
+            button?.apply {
+                setTextColor(text)
+                backgroundTintList = null
+                background =
+                    RippleDrawable(
+                        ColorStateList.valueOf(colors.ripple),
+                        null,
+                        GradientDrawable().apply {
+                            setColor(Color.WHITE)
+                            cornerRadius = 20 * resources.displayMetrics.density
+                        },
+                    )
+            }
+        }
     }
 
     private fun command(action: String) {
@@ -700,7 +784,7 @@ class ScreenTranslationService : Service() {
         }
     }
 
-    private fun copyClean(image: Image, ignored: Rect): Bitmap {
+    private fun copySource(image: Image): Bitmap {
         val plane = image.planes[0]
         val padded =
             Bitmap.createBitmap(
@@ -711,38 +795,10 @@ class ScreenTranslationService : Service() {
         plane.buffer.rewind()
         padded.copyPixelsFromBuffer(plane.buffer)
         val cropped = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
-        val scale = minOf(1f, 1440f / maxOf(cropped.width, cropped.height))
-        val clean =
-            Bitmap.createScaledBitmap(
-                cropped,
-                (cropped.width * scale).toInt().coerceAtLeast(1),
-                (cropped.height * scale).toInt().coerceAtLeast(1),
-                true,
-            )
-        // The dock stays available to Stop. Its entire footprint is excluded from OCR/motion.
-        Canvas(clean)
-            .drawRect(
-                RectF(ignored).apply {
-                    left *= scale
-                    top *= scale
-                    right *= scale
-                    bottom *= scale
-                },
-                Paint().apply { color = BACKGROUND },
-            )
-        Canvas(clean).apply {
-            val paint = Paint().apply { color = BACKGROUND }
-            drawRect(0f, 0f, clean.width.toFloat(), screenTop * scale, paint)
-            drawRect(
-                0f,
-                (image.height - screenBottom) * scale,
-                clean.width.toFloat(),
-                clean.height.toFloat(),
-                paint,
-            )
-        }
-        if (padded !== clean && padded !== cropped) padded.recycle()
-        if (cropped !== clean) cropped.recycle()
+        // Keep native-resolution source pixels for covering the original glyphs. Only the OCR
+        // input is downscaled, once the scene has settled.
+        val clean = cropped
+        if (padded !== clean) padded.recycle()
         return clean
     }
 
@@ -770,9 +826,11 @@ class ScreenTranslationService : Service() {
         private val glow = EdgeGlowRenderer(resources.displayMetrics.density)
         private val location = IntArray(2)
         private var boxes = emptyList<Label>()
+        var source: Bitmap? = null
         var state = LiveState()
             set(value) {
                 field = value
+                if (value.recognition == null) source = null
                 layoutLabels()
                 invalidate()
             }
@@ -809,7 +867,7 @@ class ScreenTranslationService : Service() {
                 val x = ((index % 96 + .5) * width / 96).toInt().coerceIn(0, width - 1)
                 val y = ((index / 96 + .5) * height / rows).toInt().coerceIn(0, height - 1)
                 val color = overlay.getPixel(x, y)
-                val opacity = Color.alpha(color) / 255f * .75f
+                val opacity = Color.alpha(color) / 255f * TranslationLabelCover.WINDOW_ALPHA
                 val luminance =
                     (Color.red(color) * 54 + Color.green(color) * 183 + Color.blue(color) * 19) /
                         256
@@ -845,7 +903,15 @@ class ScreenTranslationService : Service() {
 
         private fun layoutLabels() {
             val recognition = state.recognition
-            if (recognition == null || width == 0 || height == 0) {
+            val clean = source
+            if (
+                recognition == null ||
+                    clean == null ||
+                    width == 0 ||
+                    height == 0 ||
+                    clean.width != width ||
+                    clean.height != height
+            ) {
                 boxes = emptyList()
                 return
             }
@@ -872,7 +938,8 @@ class ScreenTranslationService : Service() {
                     if (w < 1 || available < 1) return@mapNotNull null
                     val paint =
                         TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = Color.WHITE
+                            color = TranslationLabelCover.readableColor(colors.foreground)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                             textSize =
                                 (box.height * placement.height * .74f).coerceIn(
                                     12 * density,
@@ -893,13 +960,42 @@ class ScreenTranslationService : Service() {
                             .setMaxLines(maxLines)
                             .setEllipsize(TextUtils.TruncateAt.END)
                             .build()
+                    val h =
+                        maxOf(box.height * placement.height, layout.height.toFloat())
+                            .coerceAtMost(available.toFloat())
+                    val padding = 6 * density
+                    val rect =
+                        Rect(
+                            kotlin.math.floor(x - padding).toInt().coerceAtLeast(0),
+                            kotlin.math.floor(y - padding).toInt().coerceAtLeast(0),
+                            kotlin.math.ceil(x + w + padding).toInt().coerceAtMost(width),
+                            kotlin.math.ceil(y + h + padding).toInt().coerceAtMost(height),
+                        )
+                    val cover =
+                        TranslationLabelCover.render(clean, rect) { target ->
+                            target.drawRoundRect(
+                                x - rect.left - padding,
+                                y - rect.top - padding,
+                                x + w - rect.left + padding,
+                                y + h - rect.top + padding,
+                                5 * density,
+                                5 * density,
+                                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                    color = TranslationLabelCover.readableColor(colors.surface)
+                                },
+                            )
+                            target.save()
+                            target.translate(x - rect.left, y - rect.top)
+                            layout.draw(target)
+                            target.restore()
+                        }
                     Label(
                         x,
                         y,
                         w,
-                        maxOf(box.height * placement.height, layout.height.toFloat())
-                            .coerceAtMost(available.toFloat()),
-                        layout,
+                        h,
+                        rect,
+                        cover,
                     )
                 }
         }
@@ -908,21 +1004,10 @@ class ScreenTranslationService : Service() {
             getLocationInWindow(location)
             glow.updateBounds(width, height, rootWindowInsets, location[0], location[1])
             glow.draw(canvas)
-            val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = BACKGROUND }
             boxes.forEach { box ->
                 canvas.save()
                 canvas.clipRect(0, 0, width, height)
-                canvas.drawRoundRect(
-                    box.x - 3,
-                    box.y - 3,
-                    box.x + box.width + 3,
-                    box.y + box.height + 3,
-                    5f,
-                    5f,
-                    background,
-                )
-                canvas.translate(box.x, box.y)
-                box.layout.draw(canvas)
+                canvas.drawBitmap(box.cover, box.rect.left.toFloat(), box.rect.top.toFloat(), null)
                 canvas.restore()
             }
             canvas.drawRect(
@@ -947,7 +1032,8 @@ class ScreenTranslationService : Service() {
         val y: Float,
         val width: Float,
         val height: Float,
-        val layout: StaticLayout,
+        val rect: Rect,
+        val cover: Bitmap,
     )
 
     override fun onDestroy() {

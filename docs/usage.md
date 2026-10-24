@@ -38,6 +38,23 @@ Tap **Translate** in the assistant to open **Translate your screen**, then choos
 
 Translations appear over the original text and refresh after scrolling or other screen movement settles. A compact floating dock changes the translation language, toggles the original text, pauses/resumes, or stops the session; there is no large translation-text panel. Android's capture indicator can also stop the session.
 
+**Capture permission:** Android normally asks for consent for each new screen-sharing session. Pause/Resume and opening the controls reuse the running session. Display-over-other-apps access is a separate permission that can remain enabled.
+
+For a user-managed device with ADB enabled, AOSP and the inspected GrapheneOS implementation also support a persistent app-op override that skips Android's screen-sharing confirmation:
+
+```sh
+adb shell appops set --user current app.glimpse PROJECT_MEDIA allow
+adb shell appops get --user current app.glimpse PROJECT_MEDIA
+```
+
+Glimpse still obtains a fresh projection for each session; it never saves or reuses old capture tokens. Its own language/start panel still appears. To restore Android's confirmation, stop any running capture and run:
+
+```sh
+adb shell appops set --user current app.glimpse PROJECT_MEDIA default
+```
+
+Use the relevant profile ID instead of `current` if Glimpse is installed in a different Android user/profile. This override is managed by Android, not an in-app grant, and can be removed by an app-op reset or uninstall.
+
 Protected content remains subject to Android's restrictions. Apps that hide third-party overlays, including some Android Settings screens, also hide the translated labels and floating controls; Android's capture indicator remains available to stop the session.
 
 ## Music

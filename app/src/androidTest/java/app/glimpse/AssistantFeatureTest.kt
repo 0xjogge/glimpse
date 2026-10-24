@@ -428,6 +428,8 @@ class AssistantFeatureTest {
 
     @Test
     fun liveScreenCaptureHasWorkingPauseAndStopControls() {
+        val preferences = (context.applicationContext as GlimpseApplication).graph.preferences
+        val previous = runBlocking { preferences.values.first() }
         shell("appops set app.glimpse SYSTEM_ALERT_WINDOW allow")
         shell("appops set app.glimpse PROJECT_MEDIA allow")
         try {
@@ -449,6 +451,7 @@ class AssistantFeatureTest {
             device.dumpWindowHierarchy(File(context.cacheDir, "live-screen.xml"))
             assertTrue(controlsVisible)
             await { ScreenTranslationSession.state.value.cleanFrames > 0 }
+            File(context.cacheDir, "live-windows.txt").writeText(shell("dumpsys window windows"))
             assertFalse(device.hasObject(By.textContains("Entire-screen sharing detected")))
             assertFalse(device.hasObject(By.text("Choose a single app")))
             device.findObject(button("Original")).click()
@@ -463,10 +466,104 @@ class AssistantFeatureTest {
                 !ScreenTranslationSession.state.value.paused &&
                     ScreenTranslationSession.state.value.cleanFrames > 1
             }
+            val capturesBeforeReentry = ScreenTranslationSession.state.value.cleanFrames
+            instrumentation.runOnMainSync {
+                context.startActivity(
+                    Intent(context, CapturePermissionActivity::class.java)
+                        .setAction(CapturePermissionActivity.LIVE_TRANSLATE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            assertTrue(device.wait(Until.hasObject(button("Apply")), 10000))
+            assertFalse(device.hasObject(button("Start translating")))
+            assertTrue(ScreenTranslationSession.state.value.active)
+            assertTrue(ScreenTranslationSession.state.value.cleanFrames >= capturesBeforeReentry)
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(button("Stop")), 10000))
+            for (dark in listOf(false, true)) {
+                for (dynamic in listOf(false, true)) {
+                    runBlocking {
+                        preferences.set("theme", if (dark) "dark" else "light")
+                        preferences.set("dynamicColor", dynamic)
+                    }
+                    var checked = false
+                    await {
+                        instrumentation.runOnMainSync {
+                            val root =
+                                android.view.inspector.WindowInspector.getGlobalWindowViews()
+                                    .firstOrNull {
+                                        (it.layoutParams
+                                                as? android.view.WindowManager.LayoutParams)
+                                            ?.title == "Glimpse translation controls"
+                                    }
+                            fun findDock(view: android.view.View): android.widget.LinearLayout? {
+                                if (
+                                    view is android.widget.LinearLayout &&
+                                        view.background is
+                                            android.graphics.drawable.GradientDrawable
+                                )
+                                    return view
+                                if (view is android.view.ViewGroup)
+                                    for (index in 0 until view.childCount) findDock(
+                                            view.getChildAt(index),
+                                        )
+                                        ?.let {
+                                            return it
+                                        }
+                                return null
+                            }
+                            val dockView = root?.let(::findDock)
+                            val color =
+                                (dockView?.background
+                                        as? android.graphics.drawable.GradientDrawable)
+                                    ?.color
+                                    ?.defaultColor
+                            if (
+                                color != null &&
+                                    (androidx.core.graphics.ColorUtils.calculateLuminance(color) <
+                                        .1) == dark
+                            ) {
+                                fun checkText(view: android.view.View) {
+                                    if (
+                                        view is android.widget.TextView &&
+                                            view.isShown &&
+                                            view.isEnabled &&
+                                            view.text.isNotEmpty()
+                                    )
+                                        assertTrue(
+                                            "Live control ${view.text} has poor contrast",
+                                            androidx.core.graphics.ColorUtils.calculateContrast(
+                                                view.currentTextColor,
+                                                color,
+                                            ) >= 4.5,
+                                        )
+                                    if (view is android.view.ViewGroup)
+                                        for (index in 0 until view.childCount) checkText(
+                                            view.getChildAt(index),
+                                        )
+                                }
+                                checkText(dockView!!)
+                                checked = true
+                            }
+                        }
+                        checked
+                    }
+                    device.takeScreenshot(
+                        File(
+                            context.cacheDir,
+                            "live-dock-${if (dark) "dark" else "light"}-${if (dynamic) "dynamic" else "static"}.png",
+                        ),
+                    )
+                }
+            }
             device.findObject(button("Stop")).click()
             assertTrue(device.wait(Until.gone(button("Stop")), 5000))
             await { !ScreenTranslationSession.state.value.active }
         } finally {
+            runBlocking {
+                preferences.set("theme", previous.theme)
+                preferences.set("dynamicColor", previous.dynamicColor)
+            }
             context.stopService(
                 Intent(context, app.glimpse.assistant.ScreenTranslationService::class.java),
             )

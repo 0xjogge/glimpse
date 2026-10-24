@@ -44,7 +44,9 @@ CameraX keeps only the latest analysis frame. Analysis is throttled, upright ima
 
 Live screen translation captures the whole display through a per-session MediaProjection after platform consent, without an app picker. Capture/motion tracking is separate from clean, settled-frame OCR and translation: screen movement invalidates the current presentation, and analysis resumes after the content settles, including when switching apps. The service suppresses its labels and edge presentation while acquiring clean input; the control dock remains available, with its footprint excluded from OCR and motion sampling. System bars are excluded too, so the recording timer does not continuously invalidate a still scene. A marked-to-unmarked stream transition fences clean input; reader/session epochs reject stale frames. Generations reject stale analysis and translation results after content or session changes.
 
-Translated regions are presented in place through a pass-through label window. A separate compact dock provides language, original-text, pause/resume and stop controls rather than a large translation-text panel. The label window stays below Android's untrusted-touch opacity threshold so scrolling remains possible.
+Translated regions are presented in place through a pass-through label window. A separate compact dock provides language, original-text, pause/resume and stop controls rather than a large translation-text panel. The label window stays within Android's untrusted-touch opacity limit so scrolling remains possible.
+
+Compose and native controls resolve the same saved light/dark/system and wallpaper-color preferences, with explicit surface/foreground pairs. Translation labels retain the clean scene at native resolution: their backing pixels compensate for Android's touch-through window alpha so the original lettering is covered rather than showing through. Target label colors are constrained to the attainable high-contrast range; OCR still uses a downscaled image. Scene/geometry invalidation hides those patches as soon as their source is no longer current.
 
 ## Android integration
 
